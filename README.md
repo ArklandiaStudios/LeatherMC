@@ -55,6 +55,12 @@ docker run -p 25565:25565 leathermc
 - `crates/protocol` — Minecraft wire-protocol primitives (VarInt, packet framing).
 - `crates/server` — the server binary (`leathermc`): networking and connection handling.
 
+## Contributing
+
+Contributions are welcome — the server is built one small brick at a time. Please read
+[CONTRIBUTING.md](CONTRIBUTING.md) (workflow, DCO sign-off, coding rules) and our
+[Code of Conduct](CODE_OF_CONDUCT.md) first.
+
 ## License
 
 [MIT](LICENSE) © Arklandia Studios
