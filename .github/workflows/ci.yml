@@ -33,9 +33,33 @@ jobs:
       - name: Tests
         run: cargo test --all
 
-  # Verify the production Docker image builds for amd64 and arm64.
+  # Verify every commit in a PR is signed off (Developer Certificate of Origin).
+  dco:
+    name: DCO sign-off
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Check Signed-off-by on every commit
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          fail=0
+          for c in $(git rev-list "$base..$head"); do
+            if ! git show -s --format='%(trailers:key=Signed-off-by)' "$c" | grep -q 'Signed-off-by:'; then
+              echo "::error::Commit $c is missing a 'Signed-off-by' line. Use 'git commit -s'."
+              fail=1
+            fi
+          done
+          exit $fail
+
+  # Build the production Docker image.
+  # PRs build amd64 only (fast); pushes to main also build arm64 (slow, emulated).
   docker:
-    name: docker build (multi-arch)
+    name: docker build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -46,10 +70,10 @@ jobs:
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build image (amd64 + arm64)
+      - name: Build image
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ github.event_name == 'push' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
           push: false
           tags: leathermc:ci

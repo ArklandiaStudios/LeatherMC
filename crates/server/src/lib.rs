@@ -4,6 +4,8 @@
 //! integration tests (and, later, embedded elsewhere). The `leathermc` binary
 //! is a thin wrapper around [`run`].
 
+#![deny(unsafe_code)]
+
 pub mod config;
 pub mod connection;
 pub mod status;

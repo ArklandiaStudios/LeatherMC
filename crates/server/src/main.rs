@@ -5,6 +5,8 @@
 //! Login and gameplay are not implemented yet — login attempts get a friendly
 //! disconnect message.
 
+#![deny(unsafe_code)]
+
 use leather_server::config::ServerConfig;
 
 #[tokio::main]

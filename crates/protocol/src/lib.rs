@@ -6,6 +6,8 @@
 //! the modern protocol (Netty rewrite). Packet *meaning* lives in the server
 //! crate, which builds on top of these primitives.
 
+#![deny(unsafe_code)]
+
 mod error;
 mod packet;
 mod varint;
