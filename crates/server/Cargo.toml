@@ -1,0 +1,25 @@
+[package]
+name = "leather-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "LeatherMC — a vanilla Minecraft server written in Rust (work in progress)."
+
+[lib]
+name = "leather_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "leathermc"
+path = "src/main.rs"
+
+[dependencies]
+leather-protocol = { path = "../protocol" }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
