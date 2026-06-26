@@ -6,7 +6,8 @@ JVM-plugin (`.jar`) compatibility as a long-term goal.
 > Status: `0.0.1-alpha` · very early. A vanilla **26.2** client can **join and walk around an endless
 > flat world**: Server List Ping, offline-mode login, Configuration (registries + tags), Play (Join Game,
 > spawn) and **chunk streaming** all work. The world is a flat stone floor generated on the fly and sent
-> as the player moves. No block interaction or persistence yet. Target protocol: **776**.
+> as the player moves. In creative the player can break and place blocks, and edits persist (saved to
+> disk and re-sent on reconnect). No entities yet. Target protocol: **776**.
 
 ## Why
 
@@ -24,7 +25,8 @@ The server is built incrementally; each brick depends on the previous one.
 4. ✅ **Chunks / ground** — an endless flat stone world, streamed around the player as they move (keep-alive too).
 5. ✅ **Chat** — the player's messages are echoed back as system chat.
 6. ✅ **Break / place blocks** — creative: break with left-click, place the held block with right-click.
-7. World persistence. ← *next*
+7. ✅ **World persistence** — edits are kept in a shared world (non-uniform chunks) and saved to disk.
+8. Entities / mobs. ← *next*
 8. Inventory & items.
 9. Entities / mobs.
 10. World persistence (Anvil format).

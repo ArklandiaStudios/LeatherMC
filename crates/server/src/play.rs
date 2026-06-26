@@ -10,6 +10,7 @@ use tokio::net::TcpStream;
 
 use crate::chunk::flat_chunk;
 use crate::registries::Registries;
+use crate::world::World;
 
 // Clientbound play packet ids (protocol 776).
 const P_LOGIN: i32 = 49; // "Join Game"
@@ -48,7 +49,12 @@ const VIEW_DISTANCE: i32 = 8;
 /// otherwise the outermost visible chunks have blocks but no rendered faces.
 const SEND_RADIUS: i32 = VIEW_DISTANCE + 1;
 
-pub async fn handle(stream: &mut TcpStream, registries: &Registries, name: &str) -> Result<()> {
+pub async fn handle(
+    stream: &mut TcpStream,
+    registries: &Registries,
+    name: &str,
+    world: &World,
+) -> Result<()> {
     send_join_game(stream, registries).await?;
     send_spawn_position(stream).await?;
 
@@ -66,7 +72,7 @@ pub async fn handle(stream: &mut TcpStream, registries: &Registries, name: &str)
     let (mut reader, mut writer) = stream.split();
     let mut loaded: HashSet<(i32, i32)> = HashSet::new();
     let (mut center_x, mut center_z) = (0, 0);
-    load_around(&mut writer, center_x, center_z, &mut loaded, biome).await?;
+    load_around(&mut writer, center_x, center_z, &mut loaded, biome, world).await?;
 
     // Track the creative hotbar so we can place the block the player holds.
     let mut inventory: HashMap<i32, i32> = HashMap::new(); // container slot -> item id
@@ -94,7 +100,7 @@ pub async fn handle(stream: &mut TcpStream, registries: &Registries, name: &str)
                             if cx != center_x || cz != center_z {
                                 center_x = cx;
                                 center_z = cz;
-                                load_around(&mut writer, cx, cz, &mut loaded, biome).await?;
+                                load_around(&mut writer, cx, cz, &mut loaded, biome, world).await?;
                             }
                         }
                     }
@@ -115,6 +121,8 @@ pub async fn handle(stream: &mut TcpStream, registries: &Registries, name: &str)
                             frame.read_varint(),
                         ) && (status == 0 || status == 2)
                         {
+                            let (x, y, z) = decode_position(pos);
+                            world.set_block(x, y, z, STATE_AIR);
                             send_block_update(&mut writer, pos, STATE_AIR).await?;
                             send_block_ack(&mut writer, seq).await?;
                         }
@@ -133,8 +141,10 @@ pub async fn handle(stream: &mut TcpStream, registries: &Registries, name: &str)
                                     .and_then(|item| registries.item_to_block.get(item))
                                     .copied();
                                 if let Some(state) = held {
-                                    let target = offset_position(pos, face);
-                                    send_block_update(&mut writer, target, state).await?;
+                                    let (tx, ty, tz) = offset_block(pos, face);
+                                    world.set_block(tx, ty, tz, state);
+                                    send_block_update(&mut writer, encode_position(tx, ty, tz), state)
+                                        .await?;
                                 }
                                 send_block_ack(&mut writer, seq).await?;
                             }
@@ -194,6 +204,7 @@ async fn load_around<W: AsyncWrite + Unpin>(
     cz: i32,
     loaded: &mut HashSet<(i32, i32)>,
     biome: i32,
+    world: &World,
 ) -> Result<()> {
     let mut center = PacketWriter::new(P_SET_CENTER_CHUNK);
     center.write_varint(cx).write_varint(cz);
@@ -213,7 +224,8 @@ async fn load_around<W: AsyncWrite + Unpin>(
 
     write_frame(writer, &PacketWriter::new(P_CHUNK_BATCH_START).into_body()).await?;
     for (x, z) in &new_chunks {
-        write_frame(writer, &flat_chunk(*x, *z, biome)).await?;
+        let edits = world.chunk_edits(*x, *z);
+        write_frame(writer, &flat_chunk(*x, *z, biome, &edits)).await?;
     }
     let mut finished = PacketWriter::new(P_CHUNK_BATCH_FINISHED);
     finished.write_varint(new_chunks.len() as i32);
@@ -238,13 +250,23 @@ async fn send_block_ack<W: AsyncWrite + Unpin>(writer: &mut W, sequence: i32) ->
     write_frame(writer, &w.into_body()).await
 }
 
-/// Moves a packed block position one block along `face` (the placement target).
-fn offset_position(packed: i64, face: i32) -> i64 {
-    let (mut x, mut y, mut z) = (
+/// Decodes a packed block position into `(x, y, z)`.
+fn decode_position(packed: i64) -> (i32, i32, i32) {
+    (
         (packed >> 38) as i32,
         (packed << 52 >> 52) as i32,
         (packed << 26 >> 38) as i32,
-    );
+    )
+}
+
+/// Packs `(x, y, z)` into the protocol's block-position long.
+fn encode_position(x: i32, y: i32, z: i32) -> i64 {
+    ((x as i64 & 0x3FF_FFFF) << 38) | ((z as i64 & 0x3FF_FFFF) << 12) | (y as i64 & 0xFFF)
+}
+
+/// The block one step along `face` from a packed position (the placement target).
+fn offset_block(packed: i64, face: i32) -> (i32, i32, i32) {
+    let (mut x, mut y, mut z) = decode_position(packed);
     match face {
         0 => y -= 1, // bottom
         1 => y += 1, // top
@@ -254,7 +276,7 @@ fn offset_position(packed: i64, face: i32) -> i64 {
         5 => x += 1, // east
         _ => {}
     }
-    ((x as i64 & 0x3FF_FFFF) << 38) | ((z as i64 & 0x3FF_FFFF) << 12) | (y as i64 & 0xFFF)
+    (x, y, z)
 }
 
 /// Sends an (unsigned) system chat message — simpler than signed player chat.

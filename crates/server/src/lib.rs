@@ -14,13 +14,16 @@ pub mod login;
 pub mod play;
 pub mod registries;
 pub mod status;
+pub mod world;
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::net::TcpListener;
 
 use config::ServerConfig;
 use registries::Registries;
+use world::World;
 
 /// Binds the listener and serves connections forever.
 pub async fn run(config: ServerConfig) -> anyhow::Result<()> {
@@ -53,6 +56,24 @@ pub async fn serve(listener: TcpListener, config: Arc<ServerConfig>) -> anyhow::
         );
     }
 
+    // Shared world; loaded from disk and saved periodically.
+    let world = Arc::new(World::load(&config.world_file));
+    tracing::info!("world: {} edited blocks", world.block_count());
+    {
+        let world = Arc::clone(&world);
+        let path = config.world_file.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(30));
+            interval.tick().await; // skip the immediate tick
+            loop {
+                interval.tick().await;
+                if let Err(err) = world.save(&path) {
+                    tracing::warn!("world save failed: {err}");
+                }
+            }
+        });
+    }
+
     loop {
         let (socket, peer) = match listener.accept().await {
             Ok(pair) => pair,
@@ -64,9 +85,10 @@ pub async fn serve(listener: TcpListener, config: Arc<ServerConfig>) -> anyhow::
 
         let config = Arc::clone(&config);
         let registries = Arc::clone(&registries);
+        let world = Arc::clone(&world);
         tokio::spawn(async move {
             socket.set_nodelay(true).ok();
-            if let Err(err) = connection::handle(socket, config, registries).await {
+            if let Err(err) = connection::handle(socket, config, registries, world).await {
                 tracing::debug!("connection from {peer} closed: {err}");
             }
         });

@@ -15,6 +15,7 @@ use tokio::net::TcpStream;
 
 use crate::config::ServerConfig;
 use crate::registries::Registries;
+use crate::world::World;
 use crate::{configuration, play};
 
 const PKT_LOGIN_START: i32 = 0x00;
@@ -25,6 +26,7 @@ pub async fn handle(
     stream: &mut TcpStream,
     _config: &ServerConfig,
     registries: &Registries,
+    world: &World,
 ) -> Result<()> {
     // 1. Login Start: name + player UUID.
     let mut start = read_frame(stream).await?;
@@ -61,5 +63,5 @@ pub async fn handle(
 
     // 4. Configuration, then Play.
     configuration::handle(stream, registries).await?;
-    play::handle(stream, registries, &name).await
+    play::handle(stream, registries, &name, world).await
 }
