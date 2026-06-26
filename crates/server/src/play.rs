@@ -1,7 +1,7 @@
 //! Play state: put the player in a flat world and stream chunks around them as
 //! they move, so the world feels endless (no visible edge).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use leather_protocol::{Nbt, PacketWriter, Result, read_frame, write_frame, write_network_nbt};
@@ -20,11 +20,22 @@ const P_SET_CENTER_CHUNK: i32 = 94;
 const P_CHUNK_BATCH_START: i32 = 12;
 const P_CHUNK_BATCH_FINISHED: i32 = 11;
 const P_SYSTEM_CHAT: i32 = 121;
+const P_BLOCK_UPDATE: i32 = 8;
+const P_BLOCK_CHANGED_ACK: i32 = 4;
 
 // Serverbound play packet ids we care about.
 const S_MOVE_POS: i32 = 30;
 const S_MOVE_POS_ROT: i32 = 31;
 const S_CHAT: i32 = 9;
+const S_PLAYER_ACTION: i32 = 41; // digging
+const S_USE_ITEM_ON: i32 = 66; // placing
+const S_SET_CARRIED_ITEM: i32 = 53; // selected hotbar slot
+const S_SET_CREATIVE_SLOT: i32 = 56; // creative inventory edit
+
+const STATE_AIR: i32 = 0;
+
+/// Player-inventory container slot of hotbar slot 0 (hotbar is slots 36..=44).
+const HOTBAR_OFFSET: i32 = 36;
 
 /// Game event id: "start waiting for level chunks".
 const EVENT_START_WAITING_FOR_CHUNKS: u8 = 13;
@@ -56,6 +67,10 @@ pub async fn handle(stream: &mut TcpStream, registries: &Registries, name: &str)
     let mut loaded: HashSet<(i32, i32)> = HashSet::new();
     let (mut center_x, mut center_z) = (0, 0);
     load_around(&mut writer, center_x, center_z, &mut loaded, biome).await?;
+
+    // Track the creative hotbar so we can place the block the player holds.
+    let mut inventory: HashMap<i32, i32> = HashMap::new(); // container slot -> item id
+    let mut selected: i32 = 0; // hotbar index 0..=8
 
     let mut interval = tokio::time::interval(Duration::from_secs(10));
     interval.tick().await; // consume the immediate first tick
@@ -89,6 +104,63 @@ pub async fn handle(stream: &mut TcpStream, registries: &Registries, name: &str)
                             tracing::info!("<{name}> {message}");
                             let line = format!("<{name}> {message}");
                             send_system_chat(&mut writer, &line).await?;
+                        }
+                    }
+                    // Break a block (status 0 = creative instant, 2 = survival finish).
+                    S_PLAYER_ACTION => {
+                        if let (Ok(status), Ok(pos), Ok(_face), Ok(seq)) = (
+                            frame.read_varint(),
+                            frame.read_i64(),
+                            frame.read_u8(),
+                            frame.read_varint(),
+                        ) && (status == 0 || status == 2)
+                        {
+                            send_block_update(&mut writer, pos, STATE_AIR).await?;
+                            send_block_ack(&mut writer, seq).await?;
+                        }
+                    }
+                    // Place the held block on the clicked face.
+                    S_USE_ITEM_ON => {
+                        if let (Ok(_hand), Ok(pos), Ok(face)) =
+                            (frame.read_varint(), frame.read_i64(), frame.read_varint())
+                        {
+                            // Skip cursor (3 f32), inside_block and world_border bools.
+                            let _ = (frame.read_f32(), frame.read_f32(), frame.read_f32());
+                            let _ = (frame.read_u8(), frame.read_u8());
+                            if let Ok(seq) = frame.read_varint() {
+                                let held = inventory
+                                    .get(&(HOTBAR_OFFSET + selected))
+                                    .and_then(|item| registries.item_to_block.get(item))
+                                    .copied();
+                                if let Some(state) = held {
+                                    let target = offset_position(pos, face);
+                                    send_block_update(&mut writer, target, state).await?;
+                                }
+                                send_block_ack(&mut writer, seq).await?;
+                            }
+                        }
+                    }
+                    // Track the selected hotbar slot.
+                    S_SET_CARRIED_ITEM => {
+                        if let Ok(slot) = frame.read_u16() {
+                            selected = i32::from(slot);
+                        }
+                    }
+                    // Track creative inventory edits (slot + item stack).
+                    S_SET_CREATIVE_SLOT => {
+                        if let Ok(slot) = frame.read_u16() {
+                            let slot = i32::from(slot);
+                            match frame.read_varint() {
+                                Ok(count) if count > 0 => {
+                                    if let Ok(item) = frame.read_varint() {
+                                        inventory.insert(slot, item);
+                                    }
+                                }
+                                Ok(_) => {
+                                    inventory.remove(&slot);
+                                }
+                                Err(_) => {}
+                            }
                         }
                     }
                     _ => {}
@@ -146,6 +218,43 @@ async fn load_around<W: AsyncWrite + Unpin>(
     let mut finished = PacketWriter::new(P_CHUNK_BATCH_FINISHED);
     finished.write_varint(new_chunks.len() as i32);
     write_frame(writer, &finished.into_body()).await
+}
+
+/// Tells the client a block changed to `state` at the packed `position`.
+async fn send_block_update<W: AsyncWrite + Unpin>(
+    writer: &mut W,
+    position: i64,
+    state: i32,
+) -> Result<()> {
+    let mut w = PacketWriter::new(P_BLOCK_UPDATE);
+    w.write_i64(position).write_varint(state);
+    write_frame(writer, &w.into_body()).await
+}
+
+/// Confirms a client action `sequence` so the client keeps its prediction.
+async fn send_block_ack<W: AsyncWrite + Unpin>(writer: &mut W, sequence: i32) -> Result<()> {
+    let mut w = PacketWriter::new(P_BLOCK_CHANGED_ACK);
+    w.write_varint(sequence);
+    write_frame(writer, &w.into_body()).await
+}
+
+/// Moves a packed block position one block along `face` (the placement target).
+fn offset_position(packed: i64, face: i32) -> i64 {
+    let (mut x, mut y, mut z) = (
+        (packed >> 38) as i32,
+        (packed << 52 >> 52) as i32,
+        (packed << 26 >> 38) as i32,
+    );
+    match face {
+        0 => y -= 1, // bottom
+        1 => y += 1, // top
+        2 => z -= 1, // north
+        3 => z += 1, // south
+        4 => x -= 1, // west
+        5 => x += 1, // east
+        _ => {}
+    }
+    ((x as i64 & 0x3FF_FFFF) << 38) | ((z as i64 & 0x3FF_FFFF) << 12) | (y as i64 & 0xFFF)
 }
 
 /// Sends an (unsigned) system chat message — simpler than signed player chat.

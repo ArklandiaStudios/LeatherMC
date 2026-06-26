@@ -23,7 +23,8 @@ The server is built incrementally; each brick depends on the previous one.
 3. ✅ **Join an empty world** — configuration (registries + tags) + play; spawn, see the sky.
 4. ✅ **Chunks / ground** — an endless flat stone world, streamed around the player as they move (keep-alive too).
 5. ✅ **Chat** — the player's messages are echoed back as system chat.
-6. Break / place blocks. ← *next*
+6. ✅ **Break / place blocks** — creative: break with left-click, place the held block with right-click.
+7. World persistence. ← *next*
 8. Inventory & items.
 9. Entities / mobs.
 10. World persistence (Anvil format).

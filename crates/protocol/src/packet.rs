@@ -86,6 +86,11 @@ impl PacketReader {
         Ok(i64::from_be_bytes(b.try_into().unwrap()))
     }
 
+    pub fn read_f32(&mut self) -> Result<f32> {
+        let b = self.take(4)?;
+        Ok(f32::from_be_bytes(b.try_into().unwrap()))
+    }
+
     pub fn read_f64(&mut self) -> Result<f64> {
         let b = self.take(8)?;
         Ok(f64::from_be_bytes(b.try_into().unwrap()))

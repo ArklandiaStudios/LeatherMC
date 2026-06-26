@@ -12,7 +12,10 @@
 //! A registry's id is its directory path (e.g. `minecraft:worldgen/biome`); an
 //! entry's id is the file stem (e.g. `minecraft:plains`).
 
+use std::collections::HashMap;
 use std::path::Path;
+
+use leather_protocol::PacketReader;
 
 /// One registry entry: its id and the network-NBT blob to send verbatim.
 pub struct RegistryEntry {
@@ -33,6 +36,8 @@ pub struct Registries {
     /// Pre-encoded Update Tags packet body (id + payload), produced by
     /// `leather-datagen`. Empty if no `tags.bin` is present.
     pub tags: Vec<u8>,
+    /// item id -> default block state id, for placing the held block.
+    pub item_to_block: HashMap<i32, i32>,
 }
 
 impl Registries {
@@ -44,6 +49,7 @@ impl Registries {
             collect(root, root, &mut files)?;
         }
         let tags = std::fs::read(root.join("tags.bin")).unwrap_or_default();
+        let item_to_block = load_item_to_block(root);
 
         // Group by registry id.
         let mut by_registry: std::collections::BTreeMap<String, Vec<RegistryEntry>> =
@@ -67,7 +73,11 @@ impl Registries {
             .collect();
         list.sort_by(|a, b| a.id.cmp(&b.id));
 
-        Ok(Self { list, tags })
+        Ok(Self {
+            list,
+            tags,
+            item_to_block,
+        })
     }
 
     /// Total entry count, for logging.
@@ -85,6 +95,19 @@ impl Registries {
             .position(|e| e.id == entry_id)
             .map(|i| i as i32)
     }
+}
+
+/// Loads the `item_to_block.bin` table (flat VarInt pairs item_id, state_id).
+fn load_item_to_block(root: &Path) -> HashMap<i32, i32> {
+    let mut map = HashMap::new();
+    let Ok(bytes) = std::fs::read(root.join("item_to_block.bin")) else {
+        return map;
+    };
+    let mut reader = PacketReader::new(bytes);
+    while let (Ok(item), Ok(state)) = (reader.read_varint(), reader.read_varint()) {
+        map.insert(item, state);
+    }
+    map
 }
 
 /// Recursively collects `*.nbt` files, recording `(registry_dir, file_stem, bytes)`
