@@ -3,10 +3,10 @@
 A **vanilla Minecraft server written in Rust**, built from scratch — for performance, with
 JVM-plugin (`.jar`) compatibility as a long-term goal.
 
-> Status: `0.0.1-alpha` · very early. A vanilla **26.2** client can **join an empty (void) world**:
-> Server List Ping, offline-mode login, the Configuration state (registries + tags) and the Play state
-> (Join Game + spawn) all work. Chunks aren't sent yet, so you spawn in the void and the client takes a
-> few seconds (its chunk-load timeout) before letting you in. Target protocol: **776**.
+> Status: `0.0.1-alpha` · very early. A vanilla **26.2** client can **join and walk around an endless
+> flat world**: Server List Ping, offline-mode login, Configuration (registries + tags), Play (Join Game,
+> spawn) and **chunk streaming** all work. The world is a flat stone floor generated on the fly and sent
+> as the player moves. No block interaction or persistence yet. Target protocol: **776**.
 
 ## Why
 
@@ -20,11 +20,10 @@ The server is built incrementally; each brick depends on the previous one.
 
 1. ✅ **Server List Ping** — the server appears in the multiplayer list.
 2. ✅ **Login (offline mode)** — get past the connection screen.
-3. ✅ **Join an empty world** — configuration (registries + tags) + play; spawn in the void, see the sky.
-4. Keep-alive + chat.
-5. Chunks / ground (flat world). ← *next* (removes the chunk-load wait on join)
-6. Movement + seeing other players.
-7. Break / place blocks.
+3. ✅ **Join an empty world** — configuration (registries + tags) + play; spawn, see the sky.
+4. ✅ **Chunks / ground** — an endless flat stone world, streamed around the player as they move (keep-alive too).
+5. Chat. ← *next*
+6. Break / place blocks.
 8. Inventory & items.
 9. Entities / mobs.
 10. World persistence (Anvil format).
