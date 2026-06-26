@@ -9,6 +9,7 @@ use crate::config::ServerConfig;
 use crate::login;
 use crate::registries::Registries;
 use crate::status::build_status_json;
+use crate::world::World;
 
 // Packet ids (uncompressed, current protocol).
 const PKT_HANDSHAKE: i32 = 0x00;
@@ -22,6 +23,7 @@ pub async fn handle(
     mut stream: TcpStream,
     config: Arc<ServerConfig>,
     registries: Arc<Registries>,
+    world: Arc<World>,
 ) -> Result<()> {
     // --- Handshake -----------------------------------------------------------
     let mut handshake = read_frame(&mut stream).await?;
@@ -39,7 +41,7 @@ pub async fn handle(
 
     match State::from_next_state(next_state)? {
         State::Status => handle_status(&mut stream, &config, client_protocol).await,
-        State::Login => login::handle(&mut stream, &config, &registries).await,
+        State::Login => login::handle(&mut stream, &config, &registries, &world).await,
         State::Handshake => Ok(()), // unreachable: next_state is never 0
     }
 }

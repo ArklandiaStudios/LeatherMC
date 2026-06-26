@@ -5,3 +5,6 @@
 # Generated vanilla registry data (Mojang's content) — never committed.
 /registries/
 
+# Saved world (local runtime state).
+/world.bin
+

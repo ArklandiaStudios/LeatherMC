@@ -15,6 +15,8 @@ pub struct ServerConfig {
     pub version_name: String,
     /// Directory of generated registry NBT files (produced by `leather-datagen`).
     pub registries_dir: PathBuf,
+    /// File the world's block edits are saved to / loaded from.
+    pub world_file: PathBuf,
 }
 
 impl Default for ServerConfig {
@@ -26,6 +28,7 @@ impl Default for ServerConfig {
             max_players: 20,
             version_name: "LeatherMC 26.2".to_string(),
             registries_dir: PathBuf::from("registries"),
+            world_file: PathBuf::from("world.bin"),
         }
     }
 }
