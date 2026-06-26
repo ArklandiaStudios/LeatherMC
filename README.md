@@ -3,8 +3,9 @@
 A **vanilla Minecraft server written in Rust**, built from scratch — for performance, with
 JVM-plugin (`.jar`) compatibility as a long-term goal.
 
-> Status: `0.0.1-alpha` · very early. Currently the server answers the **Server List Ping** only:
-> it shows up in the multiplayer list. Joining the world is not implemented yet.
+> Status: `0.0.1-alpha` · very early. The server answers the **Server List Ping** and handles
+> **offline-mode login** (the client gets past the login screen, then receives a "world coming soon"
+> disconnect). Joining an actual world is not implemented yet. Target: Minecraft **26.2** (protocol 776).
 
 ## Why
 
@@ -16,9 +17,9 @@ plugin compatibility (by embedding a JVM via FFI) is planned **after** the vanil
 
 The server is built incrementally; each brick depends on the previous one.
 
-1. **Server List Ping** ← *we are here* — the server appears in the multiplayer list.
-2. Login (offline mode) — get past the connection screen.
-3. Join an empty world — spawn, see the sky.
+1. ✅ **Server List Ping** — the server appears in the multiplayer list.
+2. ✅ **Login (offline mode)** — get past the connection screen.
+3. Join an empty world — spawn, see the sky. ← *next*
 4. Keep-alive + chat.
 5. Chunks / ground (flat world).
 6. Movement + seeing other players.
