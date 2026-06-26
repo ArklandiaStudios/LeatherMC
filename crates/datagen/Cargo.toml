@@ -1,0 +1,18 @@
+[package]
+name = "leather-datagen"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Dev tool: extract Minecraft registry data from a Mojang server jar and convert it to the NBT files LeatherMC serves at runtime. The vanilla data itself is never committed."
+
+[[bin]]
+name = "leather-datagen"
+path = "src/main.rs"
+
+[dependencies]
+leather-protocol = { path = "../protocol" }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+zip = "2"

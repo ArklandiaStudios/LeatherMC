@@ -1,3 +1,7 @@
 /target
 **/*.rs.bk
 .DS_Store
+
+# Generated vanilla registry data (Mojang's content) — never committed.
+/registries/
+

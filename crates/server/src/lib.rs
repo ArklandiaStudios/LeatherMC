@@ -7,8 +7,11 @@
 #![deny(unsafe_code)]
 
 pub mod config;
+pub mod configuration;
 pub mod connection;
 pub mod login;
+pub mod play;
+pub mod registries;
 pub mod status;
 
 use std::sync::Arc;
@@ -16,6 +19,7 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 
 use config::ServerConfig;
+use registries::Registries;
 
 /// Binds the listener and serves connections forever.
 pub async fn run(config: ServerConfig) -> anyhow::Result<()> {
@@ -31,6 +35,23 @@ pub async fn run(config: ServerConfig) -> anyhow::Result<()> {
 
 /// Accept loop, factored out so tests can supply their own listener.
 pub async fn serve(listener: TcpListener, config: Arc<ServerConfig>) -> anyhow::Result<()> {
+    // Registries are loaded once and shared across connections. A missing
+    // directory is non-fatal here (ping/login still work); the world join will
+    // be incomplete until `leather-datagen` has populated it.
+    let registries = Arc::new(Registries::load(&config.registries_dir).unwrap_or_default());
+    if registries.list.is_empty() {
+        tracing::warn!(
+            "no registries loaded from {} — run leather-datagen to enable world join",
+            config.registries_dir.display()
+        );
+    } else {
+        tracing::info!(
+            "loaded {} registries ({} entries)",
+            registries.list.len(),
+            registries.entry_count()
+        );
+    }
+
     loop {
         let (socket, peer) = match listener.accept().await {
             Ok(pair) => pair,
@@ -41,9 +62,10 @@ pub async fn serve(listener: TcpListener, config: Arc<ServerConfig>) -> anyhow::
         };
 
         let config = Arc::clone(&config);
+        let registries = Arc::clone(&registries);
         tokio::spawn(async move {
             socket.set_nodelay(true).ok();
-            if let Err(err) = connection::handle(socket, config).await {
+            if let Err(err) = connection::handle(socket, config, registries).await {
                 tracing::debug!("connection from {peer} closed: {err}");
             }
         });

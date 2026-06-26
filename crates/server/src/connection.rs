@@ -7,6 +7,7 @@ use tokio::net::TcpStream;
 
 use crate::config::ServerConfig;
 use crate::login;
+use crate::registries::Registries;
 use crate::status::build_status_json;
 
 // Packet ids (uncompressed, current protocol).
@@ -17,7 +18,11 @@ const PKT_STATUS_RESPONSE: i32 = 0x00;
 const PKT_PONG_RESPONSE: i32 = 0x01;
 
 /// Drives a single client connection until it closes.
-pub async fn handle(mut stream: TcpStream, config: Arc<ServerConfig>) -> Result<()> {
+pub async fn handle(
+    mut stream: TcpStream,
+    config: Arc<ServerConfig>,
+    registries: Arc<Registries>,
+) -> Result<()> {
     // --- Handshake -----------------------------------------------------------
     let mut handshake = read_frame(&mut stream).await?;
     let packet_id = handshake.read_varint()?;
@@ -34,7 +39,7 @@ pub async fn handle(mut stream: TcpStream, config: Arc<ServerConfig>) -> Result<
 
     match State::from_next_state(next_state)? {
         State::Status => handle_status(&mut stream, &config, client_protocol).await,
-        State::Login => login::handle(&mut stream, &config).await,
+        State::Login => login::handle(&mut stream, &config, &registries).await,
         State::Handshake => Ok(()), // unreachable: next_state is never 0
     }
 }

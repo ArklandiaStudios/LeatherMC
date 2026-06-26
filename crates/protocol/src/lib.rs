@@ -9,10 +9,12 @@
 #![deny(unsafe_code)]
 
 mod error;
+mod nbt;
 mod packet;
 mod varint;
 
 pub use error::{ProtocolError, Result};
+pub use nbt::{Nbt, write_network_nbt};
 pub use packet::{PacketReader, PacketWriter, read_frame, write_frame};
 pub use varint::{read_varint, varint_len, write_varint};
 
