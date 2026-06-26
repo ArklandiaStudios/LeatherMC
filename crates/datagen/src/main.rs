@@ -1,11 +1,17 @@
 //! `leather-datagen` — extracts vanilla registry data from a Mojang server jar
-//! and writes it as the NBT files LeatherMC loads at runtime.
+//! and writes it as the NBT files (and tags) LeatherMC loads at runtime.
 //!
 //! Usage:
 //!
 //! ```text
-//! leather-datagen <path/to/server.jar> <output-dir>
+//! leather-datagen <path/to/server.jar> <output-dir> [registries.json]
 //! ```
+//!
+//! `registries.json` is produced by the vanilla data generator
+//! (`java -DbundlerMainClass=net.minecraft.data.Main -jar server.jar --reports`,
+//! then `generated/reports/registries.json`). It supplies the numeric ids of the
+//! built-in registries (block, item, …) needed to encode tags. Without it, only
+//! registry NBT is written (no tags).
 //!
 //! The vanilla data is Mojang's; it is intentionally **not** committed to this
 //! repository. Each server operator runs this tool once against their own jar.
@@ -13,7 +19,9 @@
 #![deny(unsafe_code)]
 
 mod convert;
+mod tags;
 
+use std::collections::BTreeMap;
 use std::io::{Cursor, Read};
 use std::path::Path;
 
@@ -25,7 +33,7 @@ use convert::json_to_nbt;
 
 /// The registries the server sends to clients during the Configuration state,
 /// for Minecraft 26.2 (protocol 776). Slashes are kept (e.g. `worldgen/biome`).
-const SYNCED_REGISTRIES: &[&str] = &[
+pub const SYNCED_REGISTRIES: &[&str] = &[
     "banner_pattern",
     "cat_sound_variant",
     "cat_variant",
@@ -61,12 +69,28 @@ fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
     let (jar, out) = match (args.next(), args.next()) {
         (Some(jar), Some(out)) => (jar, out),
-        _ => bail!("usage: leather-datagen <server.jar> <output-dir>"),
+        _ => bail!("usage: leather-datagen <server.jar> <output-dir> [registries.json]"),
     };
+    let registries_json = args.next();
 
-    let inner = open_inner_jar(&jar).context("opening the bundled server jar")?;
-    let count = convert_registries(inner, Path::new(&out))?;
-    println!("done: wrote {count} registry entries to {out}");
+    let mut inner = open_inner_jar(&jar).context("opening the bundled server jar")?;
+    let out = Path::new(&out);
+
+    // `entries` maps each synced registry id -> its entry ids, sorted, so we and
+    // the server agree on the index a tag refers to.
+    let (count, entries) = convert_registries(&mut inner, out)?;
+    println!("wrote {count} registry entries");
+
+    match registries_json {
+        Some(path) => {
+            let n = tags::write_tags(&mut inner, out, &path, &entries)
+                .context("building Update Tags")?;
+            println!("wrote {n} tags");
+        }
+        None => println!("no registries.json given — skipping tags"),
+    }
+
+    println!("done: {}", out.display());
     Ok(())
 }
 
@@ -99,8 +123,13 @@ fn open_inner_jar(jar: &str) -> Result<ZipArchive<Cursor<Vec<u8>>>> {
 }
 
 /// Converts every synced registry's JSON entries to NBT files under `out`.
-fn convert_registries(mut inner: ZipArchive<Cursor<Vec<u8>>>, out: &Path) -> Result<usize> {
+/// Returns the total count and, per registry id, the sorted list of entry ids.
+fn convert_registries(
+    inner: &mut ZipArchive<Cursor<Vec<u8>>>,
+    out: &Path,
+) -> Result<(usize, BTreeMap<String, Vec<String>>)> {
     let mut total = 0usize;
+    let mut entries: BTreeMap<String, Vec<String>> = BTreeMap::new();
 
     for i in 0..inner.len() {
         let mut entry = inner.by_index(i)?;
@@ -122,13 +151,20 @@ fn convert_registries(mut inner: ZipArchive<Cursor<Vec<u8>>>, out: &Path) -> Res
         let dir = out.join(registry);
         std::fs::create_dir_all(&dir)?;
         std::fs::write(dir.join(format!("{id}.nbt")), &bytes)?;
+        entries
+            .entry(format!("minecraft:{registry}"))
+            .or_default()
+            .push(format!("minecraft:{id}"));
         total += 1;
     }
 
     if total == 0 {
         bail!("no registry entries found — is this the right server jar?");
     }
-    Ok(total)
+    for ids in entries.values_mut() {
+        ids.sort();
+    }
+    Ok((total, entries))
 }
 
 /// If `name` is a synced-registry datapack file

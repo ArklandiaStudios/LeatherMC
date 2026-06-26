@@ -30,6 +30,9 @@ pub struct Registry {
 #[derive(Default)]
 pub struct Registries {
     pub list: Vec<Registry>,
+    /// Pre-encoded Update Tags packet body (id + payload), produced by
+    /// `leather-datagen`. Empty if no `tags.bin` is present.
+    pub tags: Vec<u8>,
 }
 
 impl Registries {
@@ -40,6 +43,7 @@ impl Registries {
         if root.is_dir() {
             collect(root, root, &mut files)?;
         }
+        let tags = std::fs::read(root.join("tags.bin")).unwrap_or_default();
 
         // Group by registry id.
         let mut by_registry: std::collections::BTreeMap<String, Vec<RegistryEntry>> =
@@ -63,7 +67,7 @@ impl Registries {
             .collect();
         list.sort_by(|a, b| a.id.cmp(&b.id));
 
-        Ok(Self { list })
+        Ok(Self { list, tags })
     }
 
     /// Total entry count, for logging.

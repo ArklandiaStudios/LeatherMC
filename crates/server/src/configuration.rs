@@ -41,6 +41,11 @@ pub async fn handle(stream: &mut TcpStream, registries: &Registries) -> Result<(
         match frame.read_varint()? {
             S_KNOWN_PACKS if !sent_registries => {
                 send_registries(stream, registries).await?;
+                // Update Tags (pre-encoded by leather-datagen) — the registries
+                // reference these tags, so they must arrive before finishing.
+                if !registries.tags.is_empty() {
+                    write_frame(stream, &registries.tags).await?;
+                }
                 let finish = PacketWriter::new(C_FINISH_CONFIG);
                 write_frame(stream, &finish.into_body()).await?;
                 sent_registries = true;
