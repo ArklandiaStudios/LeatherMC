@@ -61,5 +61,5 @@ pub async fn handle(
 
     // 4. Configuration, then Play.
     configuration::handle(stream, registries).await?;
-    play::handle(stream, registries).await
+    play::handle(stream, registries, &name).await
 }
