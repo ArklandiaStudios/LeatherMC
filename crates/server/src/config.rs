@@ -4,6 +4,8 @@
 //! format for this project) is a later milestone; this struct is what it will
 //! deserialize into.
 
+use std::path::PathBuf;
+
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,
@@ -11,6 +13,8 @@ pub struct ServerConfig {
     pub max_players: i32,
     /// Version name shown in the client's server list.
     pub version_name: String,
+    /// Directory of generated registry NBT files (produced by `leather-datagen`).
+    pub registries_dir: PathBuf,
 }
 
 impl Default for ServerConfig {
@@ -21,6 +25,7 @@ impl Default for ServerConfig {
             motd: "LeatherMC - Rust server (alpha)".to_string(),
             max_players: 20,
             version_name: "LeatherMC 26.2".to_string(),
+            registries_dir: PathBuf::from("registries"),
         }
     }
 }

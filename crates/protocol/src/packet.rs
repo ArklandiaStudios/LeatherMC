@@ -141,6 +141,31 @@ impl PacketWriter {
         self
     }
 
+    pub fn write_bool(&mut self, value: bool) -> &mut Self {
+        self.buf.push(u8::from(value));
+        self
+    }
+
+    pub fn write_i8(&mut self, value: i8) -> &mut Self {
+        self.buf.push(value as u8);
+        self
+    }
+
+    pub fn write_i32(&mut self, value: i32) -> &mut Self {
+        self.buf.extend_from_slice(&value.to_be_bytes());
+        self
+    }
+
+    pub fn write_f32(&mut self, value: f32) -> &mut Self {
+        self.buf.extend_from_slice(&value.to_be_bytes());
+        self
+    }
+
+    pub fn write_f64(&mut self, value: f64) -> &mut Self {
+        self.buf.extend_from_slice(&value.to_be_bytes());
+        self
+    }
+
     pub fn write_u16(&mut self, value: u16) -> &mut Self {
         self.buf.extend_from_slice(&value.to_be_bytes());
         self

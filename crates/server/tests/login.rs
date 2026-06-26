@@ -59,15 +59,25 @@ async fn offline_login_succeeds_then_configuration_disconnect() {
     // Minecraft 26.2 added a trailing session_id UUID; we reuse the player UUID.
     assert_eq!(success.read_uuid().unwrap(), UUID, "session_id (26.2)");
 
-    // 4. Login Acknowledged (0x03), no fields.
+    // 4. Login Acknowledged (0x03), no fields -> enters Configuration.
     write_frame(&mut stream, &PacketWriter::new(0x03).into_body())
         .await
         .unwrap();
 
-    // 5. Configuration Disconnect (0x02) with an NBT root String reason.
-    let mut disc = read_frame(&mut stream).await.unwrap();
-    assert_eq!(disc.read_varint().unwrap(), 0x02, "config disconnect id");
-    assert_eq!(disc.read_u8().unwrap(), 0x08, "NBT TAG_String root");
+    // 5. Configuration begins: the server announces its brand via Custom Payload
+    //    (id 0x01), on the "minecraft:brand" channel.
+    let mut brand = read_frame(&mut stream).await.unwrap();
+    assert_eq!(
+        brand.read_varint().unwrap(),
+        0x01,
+        "config custom_payload id"
+    );
+    assert_eq!(
+        brand.read_string().unwrap(),
+        "minecraft:brand",
+        "brand channel"
+    );
+    assert_eq!(brand.read_string().unwrap(), "LeatherMC", "brand value");
 
     stream.shutdown().await.ok();
 }
