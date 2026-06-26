@@ -4,7 +4,7 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
-use leather_protocol::{PacketWriter, Result, read_frame, write_frame};
+use leather_protocol::{Nbt, PacketWriter, Result, read_frame, write_frame, write_network_nbt};
 use tokio::io::AsyncWrite;
 use tokio::net::TcpStream;
 
@@ -19,10 +19,12 @@ const P_KEEP_ALIVE: i32 = 44;
 const P_SET_CENTER_CHUNK: i32 = 94;
 const P_CHUNK_BATCH_START: i32 = 12;
 const P_CHUNK_BATCH_FINISHED: i32 = 11;
+const P_SYSTEM_CHAT: i32 = 121;
 
-// Serverbound play packet ids we care about (the ones carrying a position).
+// Serverbound play packet ids we care about.
 const S_MOVE_POS: i32 = 30;
 const S_MOVE_POS_ROT: i32 = 31;
+const S_CHAT: i32 = 9;
 
 /// Game event id: "start waiting for level chunks".
 const EVENT_START_WAITING_FOR_CHUNKS: u8 = 13;
@@ -35,7 +37,7 @@ const VIEW_DISTANCE: i32 = 8;
 /// otherwise the outermost visible chunks have blocks but no rendered faces.
 const SEND_RADIUS: i32 = VIEW_DISTANCE + 1;
 
-pub async fn handle(stream: &mut TcpStream, registries: &Registries) -> Result<()> {
+pub async fn handle(stream: &mut TcpStream, registries: &Registries, name: &str) -> Result<()> {
     send_join_game(stream, registries).await?;
     send_spawn_position(stream).await?;
 
@@ -66,18 +68,30 @@ pub async fn handle(stream: &mut TcpStream, registries: &Registries) -> Result<(
                     Ok(f) => f,
                     Err(_) => return Ok(()), // client disconnected
                 };
-                // Stream new chunks when the player crosses into a new chunk.
-                if let Ok(id) = frame.read_varint()
-                    && (id == S_MOVE_POS || id == S_MOVE_POS_ROT)
-                    && let (Ok(x), Ok(_y), Ok(z)) =
-                        (frame.read_f64(), frame.read_f64(), frame.read_f64())
-                {
-                    let (cx, cz) = chunk_of(x, z);
-                    if cx != center_x || cz != center_z {
-                        center_x = cx;
-                        center_z = cz;
-                        load_around(&mut writer, cx, cz, &mut loaded, biome).await?;
+                let Ok(id) = frame.read_varint() else { continue };
+                match id {
+                    // Stream new chunks when the player crosses into a new chunk.
+                    S_MOVE_POS | S_MOVE_POS_ROT => {
+                        if let (Ok(x), Ok(_y), Ok(z)) =
+                            (frame.read_f64(), frame.read_f64(), frame.read_f64())
+                        {
+                            let (cx, cz) = chunk_of(x, z);
+                            if cx != center_x || cz != center_z {
+                                center_x = cx;
+                                center_z = cz;
+                                load_around(&mut writer, cx, cz, &mut loaded, biome).await?;
+                            }
+                        }
                     }
+                    // Echo chat back to the player as a system message.
+                    S_CHAT => {
+                        if let Ok(message) = frame.read_string() {
+                            tracing::info!("<{name}> {message}");
+                            let line = format!("<{name}> {message}");
+                            send_system_chat(&mut writer, &line).await?;
+                        }
+                    }
+                    _ => {}
                 }
             }
             _ = interval.tick() => {
@@ -132,6 +146,17 @@ async fn load_around<W: AsyncWrite + Unpin>(
     let mut finished = PacketWriter::new(P_CHUNK_BATCH_FINISHED);
     finished.write_varint(new_chunks.len() as i32);
     write_frame(writer, &finished.into_body()).await
+}
+
+/// Sends an (unsigned) system chat message — simpler than signed player chat.
+async fn send_system_chat<W: AsyncWrite + Unpin>(writer: &mut W, text: &str) -> Result<()> {
+    let mut nbt = Vec::new();
+    write_network_nbt(&mut nbt, &Nbt::String(text.to_string()));
+
+    let mut w = PacketWriter::new(P_SYSTEM_CHAT);
+    w.write_bytes(&nbt);
+    w.write_bool(false); // overlay: false = chat box (not the action bar)
+    write_frame(writer, &w.into_body()).await
 }
 
 async fn send_join_game(stream: &mut TcpStream, registries: &Registries) -> Result<()> {
