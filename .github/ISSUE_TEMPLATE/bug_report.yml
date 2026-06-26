@@ -1,0 +1,91 @@
+name: Bug Report
+description: Report something that isn't working as expected
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug! Please give us enough detail to reproduce it.
+        ⚠️ **Do not report security vulnerabilities here** — see our [security policy](https://github.com/ArklandiaStudios/LeatherMC/security/policy).
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Preliminary checks
+      options:
+        - label: I searched existing issues and this bug has not been reported yet.
+          required: true
+        - label: This is not a security vulnerability (those go through private reporting).
+          required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug and its impact.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: How can we trigger the bug?
+      placeholder: |
+        1. Start the server with...
+        2. Connect with...
+        3. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen instead.
+    validations:
+      required: true
+
+  - type: input
+    id: server-version
+    attributes:
+      label: LeatherMC version
+      description: Release tag or commit hash.
+      placeholder: "0.0.1-alpha (or commit a30b650)"
+    validations:
+      required: true
+
+  - type: input
+    id: client-version
+    attributes:
+      label: Minecraft client version
+      placeholder: "26.2"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Networking / Protocol
+        - World / Blocks
+        - Entities / Gameplay
+        - Performance
+        - Plugin compatibility (JVM / FFI)
+        - Build / CI / Docker
+        - Configuration
+        - Documentation
+        - Other / Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / screenshots
+      description: Relevant server logs, stack traces, or screenshots. They are automatically formatted, no backticks needed.
+      render: shell
+    validations:
+      required: false
