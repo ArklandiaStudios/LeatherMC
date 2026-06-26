@@ -74,8 +74,12 @@ pub async fn handle(
     let (mut center_x, mut center_z) = (0, 0);
     load_around(&mut writer, center_x, center_z, &mut loaded, biome, world).await?;
 
-    // Spawn a demo mob near the player (its chunk is loaded above).
-    crate::entity::spawn_demo_mob(&mut writer).await?;
+    // Spawn a demo mob near the player (its chunk is loaded above) and pace it
+    // back and forth so the player sees a moving entity.
+    let mut mob = crate::entity::DemoMob::pig();
+    mob.spawn(&mut writer).await?;
+    let mut mob_interval = tokio::time::interval(Duration::from_millis(50));
+    mob_interval.tick().await; // consume the immediate first tick
 
     // Track the creative hotbar so we can place the block the player holds.
     let mut inventory: HashMap<i32, i32> = HashMap::new(); // container slot -> item id
@@ -184,6 +188,11 @@ pub async fn handle(
                 w.write_i64(keep_alive_id);
                 keep_alive_id += 1;
                 if write_frame(&mut writer, &w.into_body()).await.is_err() {
+                    return Ok(());
+                }
+            }
+            _ = mob_interval.tick() => {
+                if mob.tick(&mut writer).await.is_err() {
                     return Ok(());
                 }
             }
