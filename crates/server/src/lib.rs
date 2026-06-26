@@ -6,6 +6,7 @@
 
 #![deny(unsafe_code)]
 
+pub mod chunk;
 pub mod config;
 pub mod configuration;
 pub mod connection;

@@ -86,6 +86,11 @@ impl PacketReader {
         Ok(i64::from_be_bytes(b.try_into().unwrap()))
     }
 
+    pub fn read_f64(&mut self) -> Result<f64> {
+        let b = self.take(8)?;
+        Ok(f64::from_be_bytes(b.try_into().unwrap()))
+    }
+
     /// Reads a 16-byte UUID as a single `u128` (big-endian).
     pub fn read_uuid(&mut self) -> Result<u128> {
         let b = self.take(16)?;
