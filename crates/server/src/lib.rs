@@ -8,6 +8,7 @@
 
 pub mod config;
 pub mod connection;
+pub mod login;
 pub mod status;
 
 use std::sync::Arc;

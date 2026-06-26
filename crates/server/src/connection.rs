@@ -6,6 +6,7 @@ use leather_protocol::{PacketWriter, ProtocolError, Result, State, read_frame, w
 use tokio::net::TcpStream;
 
 use crate::config::ServerConfig;
+use crate::login;
 use crate::status::build_status_json;
 
 // Packet ids (uncompressed, current protocol).
@@ -14,7 +15,6 @@ const PKT_STATUS_REQUEST: i32 = 0x00;
 const PKT_PING_REQUEST: i32 = 0x01;
 const PKT_STATUS_RESPONSE: i32 = 0x00;
 const PKT_PONG_RESPONSE: i32 = 0x01;
-const PKT_LOGIN_DISCONNECT: i32 = 0x00;
 
 /// Drives a single client connection until it closes.
 pub async fn handle(mut stream: TcpStream, config: Arc<ServerConfig>) -> Result<()> {
@@ -34,7 +34,7 @@ pub async fn handle(mut stream: TcpStream, config: Arc<ServerConfig>) -> Result<
 
     match State::from_next_state(next_state)? {
         State::Status => handle_status(&mut stream, &config, client_protocol).await,
-        State::Login => handle_login(&mut stream).await,
+        State::Login => login::handle(&mut stream, &config).await,
         State::Handshake => Ok(()), // unreachable: next_state is never 0
     }
 }
@@ -76,13 +76,4 @@ async fn handle_status(
             }
         }
     }
-}
-
-/// Login isn't implemented yet — send a friendly disconnect message.
-async fn handle_login(stream: &mut TcpStream) -> Result<()> {
-    let reason = r#"{"text":"LeatherMC (Rust) - joining is not available yet.\n\nThe server answers pings; gameplay is coming.","color":"gold"}"#;
-    let mut writer = PacketWriter::new(PKT_LOGIN_DISCONNECT);
-    writer.write_string(reason);
-    write_frame(stream, &writer.into_body()).await?;
-    Ok(())
 }

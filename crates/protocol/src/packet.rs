@@ -86,6 +86,12 @@ impl PacketReader {
         Ok(i64::from_be_bytes(b.try_into().unwrap()))
     }
 
+    /// Reads a 16-byte UUID as a single `u128` (big-endian).
+    pub fn read_uuid(&mut self) -> Result<u128> {
+        let b = self.take(16)?;
+        Ok(u128::from_be_bytes(b.try_into().unwrap()))
+    }
+
     /// Reads a VarInt from the in-memory buffer (synchronous variant).
     pub fn read_varint(&mut self) -> Result<i32> {
         let mut value: i32 = 0;
@@ -130,8 +136,35 @@ impl PacketWriter {
         Self { buf }
     }
 
+    pub fn write_u8(&mut self, value: u8) -> &mut Self {
+        self.buf.push(value);
+        self
+    }
+
+    pub fn write_u16(&mut self, value: u16) -> &mut Self {
+        self.buf.extend_from_slice(&value.to_be_bytes());
+        self
+    }
+
     pub fn write_i64(&mut self, value: i64) -> &mut Self {
         self.buf.extend_from_slice(&value.to_be_bytes());
+        self
+    }
+
+    /// Writes a `u128` as a 16-byte UUID (big-endian).
+    pub fn write_uuid(&mut self, value: u128) -> &mut Self {
+        self.buf.extend_from_slice(&value.to_be_bytes());
+        self
+    }
+
+    pub fn write_varint(&mut self, value: i32) -> &mut Self {
+        write_varint(&mut self.buf, value);
+        self
+    }
+
+    /// Appends raw bytes verbatim (e.g. a pre-encoded NBT blob).
+    pub fn write_bytes(&mut self, bytes: &[u8]) -> &mut Self {
+        self.buf.extend_from_slice(bytes);
         self
     }
 

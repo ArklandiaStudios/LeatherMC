@@ -16,6 +16,12 @@ pub use error::{ProtocolError, Result};
 pub use packet::{PacketReader, PacketWriter, read_frame, write_frame};
 pub use varint::{read_varint, varint_len, write_varint};
 
+/// Protocol version we target: Minecraft Java Edition 26.2.
+///
+/// Used for compatibility checks once login enforces it. The status response
+/// currently echoes the client's protocol instead, so any client can see us.
+pub const PROTOCOL_VERSION: i32 = 776;
+
 /// Connection states of the handshake state machine.
 ///
 /// A fresh TCP connection starts in `Handshake`; the first packet tells us
