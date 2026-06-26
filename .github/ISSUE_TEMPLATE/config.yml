@@ -1,0 +1,6 @@
+# Force contributors through a template (no blank issues).
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/ArklandiaStudios/LeatherMC/security/advisories/new
+    about: Please report security issues privately — never as a public issue.
