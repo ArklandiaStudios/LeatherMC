@@ -3,17 +3,32 @@
 //! static spawn): the mob paces back and forth, driven by the server, and turns
 //! around smoothly at each end (head leading, body following).
 
-use leather_protocol::{PacketWriter, Result, write_frame};
+use leather_protocol::{Nbt, PacketWriter, Result, write_frame, write_network_nbt};
 use tokio::io::AsyncWrite;
 
 /// Clientbound play packet ids (protocol 776).
 const P_ADD_ENTITY: i32 = 1;
 const P_ENTITY_POSITION_SYNC: i32 = 35;
 const P_ROTATE_HEAD: i32 = 83;
+const P_SET_ENTITY_DATA: i32 = 99;
 
 /// `entity_type` registry id of a pig. These ids are built-in (the registry is
 /// not data-driven), so we use the canonical protocol id from `registries.json`.
 const ENTITY_TYPE_PIG: i32 = 100;
+
+/// Entity-metadata value type ids (the VarInt "Type" of each entry).
+const META_TYPE_BOOLEAN: i32 = 8;
+const META_TYPE_OPTIONAL_TEXT: i32 = 6;
+
+/// Base `Entity` metadata indices.
+const META_IDX_CUSTOM_NAME: u8 = 2; // Optional Text Component
+const META_IDX_CUSTOM_NAME_VISIBLE: u8 = 3; // Boolean
+
+/// Marks the end of a metadata entry list.
+const META_END: u8 = 0xFF;
+
+/// The floating name shown above the demo mob.
+const MOB_NAME: &str = "LeatherPig";
 
 /// How far the mob may stray from spawn along X, and how far it steps per tick
 /// (at 20 ticks/second, like vanilla, so the motion looks right).
@@ -89,6 +104,27 @@ impl DemoMob {
         w.write_u8(yaw); // yaw (body)
         w.write_u8(yaw); // head yaw
         w.write_varint(0); // data (entity-type-specific; unused for a plain mob)
+        write_frame(writer, &w.into_body()).await
+    }
+
+    /// Sends the mob's metadata: a custom name shown floating above it. The
+    /// metadata list is `index, type, value` entries terminated by `0xFF`.
+    pub async fn send_metadata<W: AsyncWrite + Unpin>(&self, writer: &mut W) -> Result<()> {
+        let mut name_nbt = Vec::new();
+        write_network_nbt(&mut name_nbt, &Nbt::String(MOB_NAME.to_string()));
+
+        let mut w = PacketWriter::new(P_SET_ENTITY_DATA);
+        w.write_varint(self.entity_id);
+        // Custom name: an Optional Text Component (present = true, then the text).
+        w.write_u8(META_IDX_CUSTOM_NAME);
+        w.write_varint(META_TYPE_OPTIONAL_TEXT);
+        w.write_bool(true);
+        w.write_bytes(&name_nbt);
+        // Make the name always visible, not only when looked at.
+        w.write_u8(META_IDX_CUSTOM_NAME_VISIBLE);
+        w.write_varint(META_TYPE_BOOLEAN);
+        w.write_bool(true);
+        w.write_u8(META_END);
         write_frame(writer, &w.into_body()).await
     }
 

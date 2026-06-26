@@ -78,6 +78,7 @@ pub async fn handle(
     // back and forth so the player sees a moving entity.
     let mut mob = crate::entity::DemoMob::pig();
     mob.spawn(&mut writer).await?;
+    mob.send_metadata(&mut writer).await?;
     let mut mob_interval = tokio::time::interval(Duration::from_millis(50));
     mob_interval.tick().await; // consume the immediate first tick
 
