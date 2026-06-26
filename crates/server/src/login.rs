@@ -40,9 +40,16 @@ pub async fn handle(stream: &mut TcpStream, _config: &ServerConfig) -> Result<()
     let uuid = start.read_uuid()?;
     tracing::info!("login (offline): {name} ({uuid:032x})");
 
-    // 2. Login Success: offline mode echoes the UUID and sends no properties.
+    // 2. Login Success ("login_finished"). Offline mode: echo the UUID, no
+    //    properties. Minecraft 26.2 (protocol 776) added a trailing `session_id`
+    //    UUID after the properties array; we reuse the player UUID for it for now
+    //    (it only matters for chat session signing, which we don't do yet).
     let mut success = PacketWriter::new(PKT_LOGIN_SUCCESS);
-    success.write_uuid(uuid).write_string(&name).write_varint(0);
+    success
+        .write_uuid(uuid)
+        .write_string(&name)
+        .write_varint(0)
+        .write_uuid(uuid);
     write_frame(stream, &success.into_body()).await?;
 
     // 3. Login Acknowledged -> we are now in the Configuration state.

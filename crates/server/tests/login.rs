@@ -56,6 +56,8 @@ async fn offline_login_succeeds_then_configuration_disconnect() {
     assert_eq!(success.read_uuid().unwrap(), UUID, "uuid echoed");
     assert_eq!(success.read_string().unwrap(), NAME, "name echoed");
     assert_eq!(success.read_varint().unwrap(), 0, "no properties");
+    // Minecraft 26.2 added a trailing session_id UUID; we reuse the player UUID.
+    assert_eq!(success.read_uuid().unwrap(), UUID, "session_id (26.2)");
 
     // 4. Login Acknowledged (0x03), no fields.
     write_frame(&mut stream, &PacketWriter::new(0x03).into_body())
