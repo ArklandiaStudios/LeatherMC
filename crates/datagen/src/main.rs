@@ -19,6 +19,7 @@
 #![deny(unsafe_code)]
 
 mod convert;
+mod items;
 mod tags;
 
 use std::collections::BTreeMap;
@@ -86,8 +87,10 @@ fn main() -> Result<()> {
             let n = tags::write_tags(&mut inner, out, &path, &entries)
                 .context("building Update Tags")?;
             println!("wrote {n} tags");
+            let m = items::write_item_blocks(&path, out).context("building item->block table")?;
+            println!("wrote {m} item->block mappings");
         }
-        None => println!("no registries.json given — skipping tags"),
+        None => println!("no registries.json given — skipping tags and item->block table"),
     }
 
     println!("done: {}", out.display());
