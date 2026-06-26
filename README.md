@@ -26,9 +26,8 @@ The server is built incrementally; each brick depends on the previous one.
 5. ✅ **Chat** — the player's messages are echoed back as system chat.
 6. ✅ **Break / place blocks** — creative: break with left-click, place the held block with right-click.
 7. ✅ **World persistence** — edits are kept in a shared world (non-uniform chunks) and saved to disk.
-8. Entities / mobs. ← *next*
-8. Inventory & items.
-9. Entities / mobs.
+8. **Entities / mobs** — spawn and move entities. ← *next*
+9. Inventory & items.
 10. World persistence (Anvil format).
 11. World generation.
 12. JVM (`.jar`) plugin compatibility.

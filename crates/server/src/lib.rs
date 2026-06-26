@@ -10,6 +10,7 @@ pub mod chunk;
 pub mod config;
 pub mod configuration;
 pub mod connection;
+pub mod entity;
 pub mod login;
 pub mod play;
 pub mod registries;

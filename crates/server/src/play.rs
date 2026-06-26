@@ -74,6 +74,9 @@ pub async fn handle(
     let (mut center_x, mut center_z) = (0, 0);
     load_around(&mut writer, center_x, center_z, &mut loaded, biome, world).await?;
 
+    // Spawn a demo mob near the player (its chunk is loaded above).
+    crate::entity::spawn_demo_mob(&mut writer).await?;
+
     // Track the creative hotbar so we can place the block the player holds.
     let mut inventory: HashMap<i32, i32> = HashMap::new(); // container slot -> item id
     let mut selected: i32 = 0; // hotbar index 0..=8
