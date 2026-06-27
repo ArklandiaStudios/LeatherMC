@@ -11,6 +11,7 @@ const P_ADD_ENTITY: i32 = 1;
 const P_ENTITY_POSITION_SYNC: i32 = 35;
 const P_ROTATE_HEAD: i32 = 83;
 const P_SET_ENTITY_DATA: i32 = 99;
+const P_DAMAGE_EVENT: i32 = 25;
 
 /// `entity_type` registry id of a pig. These ids are built-in (the registry is
 /// not data-driven), so we use the canonical protocol id from `registries.json`.
@@ -28,7 +29,7 @@ const META_IDX_CUSTOM_NAME_VISIBLE: u8 = 3; // Boolean
 const META_END: u8 = 0xFF;
 
 /// The floating name shown above the demo mob.
-const MOB_NAME: &str = "LeatherPig";
+pub const MOB_NAME: &str = "LeatherPig";
 
 /// How far the mob may stray from spawn along X, and how far it steps per tick
 /// (at 20 ticks/second, like vanilla, so the motion looks right).
@@ -80,6 +81,28 @@ impl DemoMob {
             body_yaw: -90.0, // east
             head_yaw: -90.0,
         }
+    }
+
+    /// This mob's entity id, for matching serverbound packets that target it.
+    pub fn id(&self) -> i32 {
+        self.entity_id
+    }
+
+    /// Plays the hurt reaction (red flash + hurt sound) by telling the client
+    /// this entity took damage of `damage_type_index` (an index into the
+    /// damage_type registry we sent). No cause entity and no knockback source.
+    pub async fn hurt<W: AsyncWrite + Unpin>(
+        &self,
+        writer: &mut W,
+        damage_type_index: i32,
+    ) -> Result<()> {
+        let mut w = PacketWriter::new(P_DAMAGE_EVENT);
+        w.write_varint(self.entity_id);
+        w.write_varint(damage_type_index);
+        w.write_varint(0); // source cause entity: none
+        w.write_varint(0); // source direct entity: none
+        w.write_bool(false); // no source position
+        write_frame(writer, &w.into_body()).await
     }
 
     /// The heading the mob currently wants to face, in degrees (clockwise from

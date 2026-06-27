@@ -32,6 +32,11 @@ const S_PLAYER_ACTION: i32 = 41; // digging
 const S_USE_ITEM_ON: i32 = 66; // placing
 const S_SET_CARRIED_ITEM: i32 = 53; // selected hotbar slot
 const S_SET_CREATIVE_SLOT: i32 = 56; // creative inventory edit
+const S_INTERACT: i32 = 26; // right-click an entity
+const S_ATTACK: i32 = 1; // left-click (attack) an entity
+
+/// The main hand, as sent in the Interact packet's hand field.
+const HAND_MAIN: i32 = 0;
 
 const STATE_AIR: i32 = 0;
 
@@ -67,6 +72,9 @@ pub async fn handle(
 
     let biome = registries
         .index_of("minecraft:worldgen/biome", "minecraft:plains")
+        .unwrap_or(0);
+    let generic_damage = registries
+        .index_of("minecraft:damage_type", "minecraft:generic")
         .unwrap_or(0);
 
     let (mut reader, mut writer) = stream.split();
@@ -179,6 +187,28 @@ pub async fn handle(
                                 }
                                 Err(_) => {}
                             }
+                        }
+                    }
+                    // Left-click (attack) the demo mob: play the hurt reaction.
+                    // In 1.26.1+ attack is its own packet (just the target id).
+                    S_ATTACK => {
+                        if let Ok(target) = frame.read_varint()
+                            && target == mob.id()
+                        {
+                            mob.hurt(&mut writer, generic_damage).await?;
+                        }
+                    }
+                    // Right-click (interact) the demo mob: it oinks. The client
+                    // sends this twice per click (one per hand), so we react only
+                    // on the main hand to oink once.
+                    S_INTERACT => {
+                        if let (Ok(target), Ok(hand)) =
+                            (frame.read_varint(), frame.read_varint())
+                            && target == mob.id()
+                            && hand == HAND_MAIN
+                        {
+                            let line = format!("<{}> oink!", crate::entity::MOB_NAME);
+                            send_system_chat(&mut writer, &line).await?;
                         }
                     }
                     _ => {}
