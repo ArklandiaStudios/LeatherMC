@@ -5,6 +5,12 @@
 //! (a height function plus a surface rule) so it can grow toward biomes and
 //! density-function terrain later. This is original MIT code; Pumpkin's
 //! generator is read only as a reference for the algorithms, never copied.
+//!
+//! The submodules build toward a vanilla-parity generator that reads Mojang's
+//! extracted worldgen *data* and evaluates it with our own engine. [`rng`] is
+//! Mojang's worldgen RNG (Xoroshiro128++), the basis for seed-identical output.
+
+pub mod rng;
 
 /// Block state ids (default states, from the generated `blocks.json`).
 pub const AIR: i32 = 0;
