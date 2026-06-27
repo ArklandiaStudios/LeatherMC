@@ -114,6 +114,35 @@ impl WorldgenRandom {
     pub fn next_double(&mut self) -> f64 {
         self.next_bits(53) as f64 * 1.110_223_024_625_156_5e-16 // 2^-53
     }
+
+    /// Forks a positional factory (used to seed each noise by name).
+    pub fn fork_positional(&mut self) -> PositionalFactory {
+        PositionalFactory {
+            lo: self.gen_next(),
+            hi: self.gen_next(),
+        }
+    }
+
+    fn gen_next(&mut self) -> u64 {
+        self.inner.next_long() as u64
+    }
+}
+
+/// Vanilla's `XoroshiroPositionalRandomFactory`: derives a fresh random source
+/// from a name by MD5-hashing it and XOR-ing into the factory's state.
+pub struct PositionalFactory {
+    lo: u64,
+    hi: u64,
+}
+
+impl PositionalFactory {
+    /// A random source seeded from `name` (e.g. `"minecraft:octave_-7"`).
+    pub fn from_hash_of(&self, name: &str) -> WorldgenRandom {
+        let hash = super::md5::md5(name.as_bytes());
+        let l = u64::from_be_bytes(hash[0..8].try_into().unwrap());
+        let m = u64::from_be_bytes(hash[8..16].try_into().unwrap());
+        WorldgenRandom::from_state(l ^ self.lo, m ^ self.hi)
+    }
 }
 
 #[cfg(test)]

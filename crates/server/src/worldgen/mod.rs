@@ -10,6 +10,8 @@
 //! extracted worldgen *data* and evaluates it with our own engine. [`rng`] is
 //! Mojang's worldgen RNG (Xoroshiro128++), the basis for seed-identical output.
 
+pub mod md5;
+pub mod noise;
 pub mod rng;
 
 /// Block state ids (default states, from the generated `blocks.json`).
