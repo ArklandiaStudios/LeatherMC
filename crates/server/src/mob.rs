@@ -22,6 +22,7 @@ const P_ROTATE_HEAD: i32 = 83;
 const P_SET_ENTITY_DATA: i32 = 99;
 
 /// `animate` ids and `entity_event` statuses we use.
+const ANIM_SWING_MAIN_HAND: u8 = 0;
 const ANIM_CRITICAL_HIT: u8 = 4;
 const EVENT_DEATH: u8 = 3;
 
@@ -213,6 +214,35 @@ const AGGRO_TICKS: u32 = 200;
 const MOB_ATTACK_DAMAGE: f32 = 3.0;
 const MOB_ATTACK_INTERVAL: u32 = 20; // ticks between hits (~1s)
 const MOB_REACH: f64 = STOP_DISTANCE + 0.4;
+/// Ticks between shots for a ranged mob (~2s).
+const RANGED_INTERVAL: u32 = 40;
+
+/// Hopping mobs (slime, rabbit, breeze…): jump impulse and time between hops.
+const HOP_VELOCITY: f64 = 0.42;
+const HOP_BURST: f64 = 3.0; // horizontal speed multiplier per hop
+const HOP_INTERVAL: u32 = 12;
+/// Flying mobs hover around this height above the ground, with a gentle bob.
+const HOVER_HEIGHT: f64 = 6.0;
+
+/// How a mob gets around.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Style {
+    Ground,
+    Hop,
+    Fly,
+}
+
+/// The projectile a ranged mob fires.
+#[derive(Clone, Copy)]
+pub enum RangedShot {
+    Arrow,
+    Fireball,
+    Potion,
+    WindCharge,
+    ShulkerBullet,
+    LlamaSpit,
+    WitherSkull,
+}
 
 /// Knockback when hit: a shove away from the attacker plus a small upward pop
 /// (blocks per tick), then gravity and ground friction bring it to rest.
@@ -258,6 +288,10 @@ pub struct Mob {
     anger_ticks: u32,
     /// Ticks until this mob can melee the player again.
     attack_cooldown: u32,
+    /// Ticks until a hopping mob can jump again.
+    hop_cooldown: u32,
+    /// Phase for a flying mob's hover bob.
+    air_phase: f64,
     /// Per-mob PRNG state (xorshift), for wander/idle decisions.
     rng: u64,
     /// Current body and head headings, in degrees, eased toward the target.
@@ -294,6 +328,8 @@ impl Mob {
             panic_ticks: 0,
             anger_ticks: 0,
             attack_cooldown: 0,
+            hop_cooldown: 0,
+            air_phase: 0.0,
             // Seed the PRNG from the id so each mob wanders differently (nonzero).
             rng: 0x9E37_79B9_7F4A_7C15 ^ (entity_id as u64).wrapping_mul(0x2545_F491_4F6C_DD1D),
             body_yaw: -90.0, // east
@@ -381,6 +417,14 @@ impl Mob {
         write_frame(writer, &w.into_body()).await
     }
 
+    /// Swings the mob's main arm (the attack animation).
+    pub async fn swing<W: AsyncWrite + Unpin>(&self, writer: &mut W) -> Result<()> {
+        let mut w = PacketWriter::new(P_ANIMATE);
+        w.write_varint(self.entity_id);
+        w.write_u8(ANIM_SWING_MAIN_HAND);
+        write_frame(writer, &w.into_body()).await
+    }
+
     /// Shows the critical-hit star particles on this mob.
     pub async fn play_crit<W: AsyncWrite + Unpin>(&self, writer: &mut W) -> Result<()> {
         let mut w = PacketWriter::new(P_ANIMATE);
@@ -455,6 +499,9 @@ impl Mob {
     /// Reacts to being hurt according to the mob's behaviour: passive mobs panic
     /// and flee; neutral mobs get angry and chase; hostile mobs already chase.
     pub fn provoke(&mut self) {
+        if self.teleports() {
+            self.teleport(); // endermen blink away when hit
+        }
         match self.kind.behavior {
             Behavior::Passive => {
                 let span = PANIC_MAX_TICKS - PANIC_MIN_TICKS;
@@ -476,12 +523,82 @@ impl Mob {
             Behavior::Neutral => self.anger_ticks > 0,
             Behavior::Passive => false,
         };
-        if !aggressive || self.is_dying() || self.attack_cooldown > 0 {
+        if self.is_ranged() || !aggressive || self.is_dying() || self.attack_cooldown > 0 {
             return None;
         }
         if (self.x - px).hypot(self.z - pz) <= MOB_REACH {
             self.attack_cooldown = MOB_ATTACK_INTERVAL;
             Some(MOB_ATTACK_DAMAGE)
+        } else {
+            None
+        }
+    }
+
+    /// The mob's position (feet), e.g. as a projectile's launch point.
+    pub fn position(&self) -> (f64, f64, f64) {
+        (self.x, self.y, self.z)
+    }
+
+    /// How this mob moves: flying, hopping, or walking on the ground.
+    fn style(&self) -> Style {
+        match self.kind.name {
+            "bat" | "parrot" | "allay" | "bee" | "vex" | "blaze" | "ghast" | "phantom"
+            | "happy_ghast" | "wither" | "ender_dragon" => Style::Fly,
+            "slime" | "magma_cube" | "rabbit" | "frog" | "breeze" => Style::Hop,
+            _ => Style::Ground,
+        }
+    }
+
+    /// Endermen blink to a nearby spot (notably when provoked).
+    fn teleports(&self) -> bool {
+        self.kind.name == "enderman"
+    }
+
+    /// Jumps the mob to a random spot a few blocks away (enderman teleport).
+    fn teleport(&mut self) {
+        let angle = self.rand01() * std::f64::consts::TAU;
+        let r = 4.0 + self.rand01() * 8.0;
+        self.x += angle.cos() * r;
+        self.z += angle.sin() * r;
+        self.target = None;
+    }
+
+    /// Mobs that attack at range instead of in melee, and the projectile they use.
+    fn ranged_shot(&self) -> Option<RangedShot> {
+        match self.kind.name {
+            // Bows and crossbows both fire arrows.
+            "skeleton" | "stray" | "bogged" | "pillager" | "illusioner" | "piglin" => {
+                Some(RangedShot::Arrow)
+            }
+            "blaze" | "ghast" => Some(RangedShot::Fireball),
+            "witch" => Some(RangedShot::Potion),
+            "breeze" => Some(RangedShot::WindCharge),
+            "shulker" => Some(RangedShot::ShulkerBullet),
+            "llama" | "trader_llama" => Some(RangedShot::LlamaSpit),
+            "wither" => Some(RangedShot::WitherSkull),
+            _ => None,
+        }
+    }
+
+    fn is_ranged(&self) -> bool {
+        self.ranged_shot().is_some()
+    }
+
+    /// If this is a ranged mob, aggressive, in range and recharged, returns which
+    /// projectile to fire (and starts the cooldown). Otherwise `None`.
+    pub fn ranged_attack(&mut self, px: f64, pz: f64) -> Option<RangedShot> {
+        let aggressive = match self.kind.behavior {
+            Behavior::Hostile => true,
+            Behavior::Neutral => self.anger_ticks > 0,
+            Behavior::Passive => false,
+        };
+        if !aggressive || self.is_dying() || self.attack_cooldown > 0 {
+            return None;
+        }
+        let shot = self.ranged_shot()?;
+        if (self.x - px).hypot(self.z - pz) <= DETECT_RANGE {
+            self.attack_cooldown = RANGED_INTERVAL;
+            Some(shot)
         } else {
             None
         }
@@ -555,27 +672,40 @@ impl Mob {
         if self.attack_cooldown > 0 {
             self.attack_cooldown -= 1;
         }
+        if self.hop_cooldown > 0 {
+            self.hop_cooldown -= 1;
+        }
+        let style = self.style();
         let panicking = self.panic_ticks > 0;
         if panicking {
             self.panic_ticks -= 1;
         }
 
-        // Knockback physics: slide with the current velocity, fall under gravity,
-        // land on the ground, and lose horizontal speed to friction.
+        // Horizontal slide (knockback / hop momentum), with friction.
         self.x += self.vx;
-        self.y += self.vy;
         self.z += self.vz;
-        self.vy -= GRAVITY;
-        if self.y <= GROUND_Y {
-            self.y = GROUND_Y;
-            if self.vy < 0.0 {
-                self.vy = 0.0;
-            }
-        }
         self.vx *= FRICTION;
         self.vz *= FRICTION;
-        // While still being shoved (airborne or sliding) the mob can't steer.
-        let knocked = self.y > GROUND_Y || self.vx.hypot(self.vz) > SETTLED_SPEED;
+
+        let knocked = if style == Style::Fly {
+            // Flyers ignore gravity and hover, gently bobbing around HOVER_HEIGHT.
+            self.air_phase += 0.1;
+            let target_y = GROUND_Y + HOVER_HEIGHT + self.air_phase.sin() * 1.5;
+            self.y += (target_y - self.y) * 0.1;
+            self.vx.hypot(self.vz) > SETTLED_SPEED * 3.0 // only big shoves block steering
+        } else {
+            // Gravity, then land on the ground.
+            self.y += self.vy;
+            self.vy -= GRAVITY;
+            if self.y <= GROUND_Y {
+                self.y = GROUND_Y;
+                if self.vy < 0.0 {
+                    self.vy = 0.0;
+                }
+            }
+            // Airborne (hopping/shoved) or sliding fast = can't steer this tick.
+            self.y > GROUND_Y || self.vx.hypot(self.vz) > SETTLED_SPEED
+        };
         if knocked {
             return self.send_position(writer).await.map(|()| false);
         }
@@ -632,9 +762,19 @@ impl Mob {
                 let heading = -dx.atan2(dz).to_degrees();
                 self.face(heading);
                 if angle_diff(self.body_yaw, heading).abs() < ALIGN_THRESHOLD {
-                    let step = speed.min(dist);
-                    self.x += dx / dist * step;
-                    self.z += dz / dist * step;
+                    if style == Style::Hop {
+                        // Jump toward the target in arcs instead of gliding.
+                        if self.hop_cooldown == 0 {
+                            self.vx = dx / dist * speed * HOP_BURST;
+                            self.vz = dz / dist * speed * HOP_BURST;
+                            self.vy = HOP_VELOCITY;
+                            self.hop_cooldown = HOP_INTERVAL;
+                        }
+                    } else {
+                        let step = speed.min(dist);
+                        self.x += dx / dist * step;
+                        self.z += dz / dist * step;
+                    }
                 }
             }
         } else {

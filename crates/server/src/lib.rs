@@ -12,6 +12,7 @@ pub mod configuration;
 pub mod connection;
 pub mod login;
 pub mod mob;
+pub mod projectile;
 pub mod play;
 pub mod registries;
 pub mod status;

@@ -104,6 +104,10 @@ pub async fn handle(
     let mut mob_interval = tokio::time::interval(Duration::from_millis(50));
     mob_interval.tick().await; // consume the immediate first tick
 
+    // Projectiles fired by ranged mobs. Their ids live above the mob ids.
+    let mut projectiles: Vec<crate::projectile::Projectile> = Vec::new();
+    let mut next_projectile_id: i32 = 1000;
+
     // Track the creative hotbar so we can place the block the player holds.
     let mut inventory: HashMap<i32, i32> = HashMap::new(); // container slot -> item id
     let mut selected: i32 = 0; // hotbar index 0..=8
@@ -296,9 +300,50 @@ pub async fn handle(
                         Err(_) => return Ok(()),
                     }
                     if let Some(d) = mobs[i].melee_damage(player_x, player_z) {
+                        mobs[i].swing(&mut writer).await?; // arm-swing animation
                         hit = hit.max(d);
                     }
+                    // Ranged mobs fire a projectile toward the player's body.
+                    if let Some(shot) = mobs[i].ranged_attack(player_x, player_z) {
+                        let (mx, my, mz) = mobs[i].position();
+                        let id = next_projectile_id;
+                        next_projectile_id += 1;
+                        let from = (mx, my + 1.2, mz);
+                        let to = (player_x, player_y + 1.0, player_z);
+                        use crate::mob::RangedShot;
+                        use crate::projectile::Projectile;
+                        let proj = match shot {
+                            RangedShot::Arrow => Projectile::arrow(id, from, to),
+                            RangedShot::Fireball => Projectile::fireball(id, from, to),
+                            RangedShot::Potion => Projectile::potion(id, from, to),
+                            RangedShot::WindCharge => Projectile::wind_charge(id, from, to),
+                            RangedShot::ShulkerBullet => Projectile::shulker_bullet(id, from, to),
+                            RangedShot::LlamaSpit => Projectile::llama_spit(id, from, to),
+                            RangedShot::WitherSkull => Projectile::wither_skull(id, from, to),
+                        };
+                        proj.spawn(&mut writer).await?;
+                        projectiles.push(proj);
+                    }
                     i += 1;
+                }
+                // Advance projectiles; a hit adds to this tick's damage.
+                let mut j = 0;
+                while j < projectiles.len() {
+                    use crate::projectile::Flight;
+                    match projectiles[j]
+                        .tick(&mut writer, player_x, player_y + 1.0, player_z)
+                        .await
+                    {
+                        Ok(Flight::Hit(d)) => {
+                            hit = hit.max(d);
+                            projectiles.remove(j);
+                        }
+                        Ok(Flight::Gone) => {
+                            projectiles.remove(j);
+                        }
+                        Ok(Flight::Flying) => j += 1,
+                        Err(_) => return Ok(()),
+                    }
                 }
                 // Apply damage through the player's own immunity window.
                 if hit > 0.0 && player_invuln == 0 {
