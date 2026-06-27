@@ -60,6 +60,19 @@ pub async fn serve(listener: TcpListener, config: Arc<ServerConfig>) -> anyhow::
         );
     }
 
+    // Load Mojang's extracted noise parameters and seed a noise for each.
+    let noise_dir = config.registries_dir.join("worldgen").join("noise");
+    match worldgen::noises::Noises::load(&noise_dir, worldgen::WORLD_SEED) {
+        Ok(noises) if !noises.is_empty() => {
+            tracing::info!("loaded {} worldgen noises", noises.len());
+        }
+        Ok(_) => tracing::warn!(
+            "no worldgen noises in {} — run leather-datagen for vanilla terrain",
+            noise_dir.display()
+        ),
+        Err(err) => tracing::warn!("failed to load worldgen noises: {err}"),
+    }
+
     // Shared world; loaded from disk and saved periodically.
     let world = Arc::new(World::load(&config.world_file));
     tracing::info!("world: {} edited blocks", world.block_count());

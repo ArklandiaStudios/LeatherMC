@@ -12,7 +12,11 @@
 
 pub mod md5;
 pub mod noise;
+pub mod noises;
 pub mod rng;
+
+/// Fixed world seed for now (until it comes from config / the save).
+pub const WORLD_SEED: i64 = 0x5EED_1A11;
 
 /// Block state ids (default states, from the generated `blocks.json`).
 pub const AIR: i32 = 0;
