@@ -10,6 +10,7 @@
 //! extracted worldgen *data* and evaluates it with our own engine. [`rng`] is
 //! Mojang's worldgen RNG (Xoroshiro128++), the basis for seed-identical output.
 
+pub mod density;
 pub mod md5;
 pub mod noise;
 pub mod noises;
