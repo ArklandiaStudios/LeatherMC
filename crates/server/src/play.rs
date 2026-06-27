@@ -94,13 +94,9 @@ pub async fn handle(
     let (mut center_x, mut center_z) = (0, 0);
     load_around(&mut writer, center_x, center_z, &mut loaded, biome, world).await?;
 
-    // Showcase one of every mob kind in a grid near the player (the chunks are
-    // loaded above) so they can all be seen. Temporary until the spawning engine.
-    let mut mobs = crate::mob::Mob::showcase();
-    for m in &mobs {
-        m.spawn(&mut writer).await?;
-        m.update_name(&mut writer).await?; // TEMP debug: show health above mobs
-    }
+    // Mobs no longer spawn on their own (the natural-spawn engine is parked until
+    // worldgen). The mob systems below stay ready for when spawning returns.
+    let mut mobs: Vec<crate::mob::Mob> = Vec::new();
     let mut mob_interval = tokio::time::interval(Duration::from_millis(50));
     mob_interval.tick().await; // consume the immediate first tick
 
