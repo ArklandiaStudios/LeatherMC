@@ -87,11 +87,11 @@ pub async fn handle(
 
     // Spawn a small herd near the player (their chunk is loaded above) and pace
     // them back and forth so the player sees moving entities.
-    let mut mobs = crate::mob::Mob::herd();
-    for m in &mobs {
-        m.spawn(&mut writer).await?;
-        m.update_name(&mut writer).await?; // TEMP debug: show health above mobs
-    }
+    // Mobs spawn around the player over time (see the spawn interval below).
+    let mut mobs: Vec<crate::mob::Mob> = Vec::new();
+    let mut spawner = crate::mob::Spawner::new();
+    let mut spawn_interval = tokio::time::interval(Duration::from_secs(2));
+    spawn_interval.tick().await; // consume the immediate first tick
     let mut mob_interval = tokio::time::interval(Duration::from_millis(50));
     mob_interval.tick().await; // consume the immediate first tick
 
@@ -278,6 +278,23 @@ pub async fn handle(
                         Ok(false) => i += 1,
                         Err(_) => return Ok(()),
                     }
+                }
+            }
+            _ = spawn_interval.tick() => {
+                // Remove mobs that wandered too far, then try to spawn a new pack.
+                let mut i = 0;
+                while i < mobs.len() {
+                    if mobs[i].should_despawn(player_x, player_z) {
+                        mobs[i].despawn(&mut writer).await?;
+                        mobs.remove(i);
+                    } else {
+                        i += 1;
+                    }
+                }
+                for mob in spawner.maybe_spawn(player_x, player_z, mobs.len()) {
+                    mob.spawn(&mut writer).await?;
+                    mob.update_name(&mut writer).await?; // TEMP debug: show health
+                    mobs.push(mob);
                 }
             }
         }

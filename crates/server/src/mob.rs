@@ -103,6 +103,22 @@ const GROUND_Y: f64 = 64.0;
 /// Below this horizontal speed (and on the ground) the mob is "settled" again.
 const SETTLED_SPEED: f64 = 0.05;
 
+/// Spawning tuning (a first pass: a ring around the player, a cap, and packs).
+/// Biome/light/ground conditions will refine this once worldgen exists.
+const MOB_CAP: usize = 12;
+const SPAWN_MIN_RADIUS: f64 = 16.0;
+const SPAWN_MAX_RADIUS: f64 = 40.0;
+/// Mobs farther than this from the player are removed.
+const DESPAWN_RADIUS: f64 = 56.0;
+/// Chance, per spawn attempt, to actually spawn a pack.
+const SPAWN_CHANCE: f64 = 0.6;
+/// Up to this many mobs per pack, scattered within `PACK_SPREAD` of each other.
+const MAX_PACK: usize = 4;
+const PACK_SPREAD: f64 = 4.0;
+
+/// The kinds that can spawn (passive animals, for now).
+const SPAWNABLE: [&MobKind; 3] = [&PIG, &COW, &CHICKEN];
+
 /// Rotation model, matching vanilla (`LivingEntity::tickHeadTurn`): the head
 /// turns toward the heading at up to `HEAD_TURN` per tick, the body eases toward
 /// the head by `BODY_FOLLOW` of the gap, and the head may never stray more than
@@ -176,15 +192,10 @@ impl Mob {
         }
     }
 
-    /// A small mixed herd in parallel lanes, staggered so they don't pace in
-    /// lockstep — enough to show the engine handles several kinds at once. Entity
-    /// ids start at 2 (the player is 1).
-    pub fn herd() -> Vec<Mob> {
-        vec![
-            Mob::new(&PIG, 2, 5.0, -3.0),
-            Mob::new(&COW, 3, 5.0, 0.0),
-            Mob::new(&CHICKEN, 4, 5.0, 3.0),
-        ]
+    /// Whether the mob is too far from `(px, pz)` to keep around.
+    pub fn should_despawn(&self, px: f64, pz: f64) -> bool {
+        let (dx, dz) = (self.x - px, self.z - pz);
+        (dx * dx + dz * dz).sqrt() > DESPAWN_RADIUS
     }
 
     /// This mob's entity id, for matching serverbound packets that target it.
@@ -462,6 +473,74 @@ impl Mob {
         head.write_varint(self.entity_id);
         head.write_u8(yaw_to_angle(self.head_yaw));
         write_frame(writer, &head.into_body()).await
+    }
+}
+
+/// Spawns mobs around the player: a first-pass natural-spawn engine. It keeps to
+/// a population cap and spawns small packs in a ring around the player. Ground,
+/// light and biome conditions will be added once the world supports them.
+pub struct Spawner {
+    rng: u64,
+    next_id: i32,
+}
+
+impl Default for Spawner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Spawner {
+    pub fn new() -> Self {
+        // Seed from the clock so each run spawns differently (nonzero).
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0x1234_5678)
+            | 1;
+        // Entity ids start at 2 (the player is 1).
+        Self { rng: seed, next_id: 2 }
+    }
+
+    fn next_rng(&mut self) -> u64 {
+        let mut x = self.rng;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.rng = x;
+        x
+    }
+
+    fn rand01(&mut self) -> f64 {
+        (self.next_rng() >> 11) as f64 / (1u64 << 53) as f64
+    }
+
+    /// Maybe spawn a pack of mobs around `(px, pz)`, respecting the population
+    /// cap (`alive` is the current mob count). Returns the new mobs to add.
+    pub fn maybe_spawn(&mut self, px: f64, pz: f64, alive: usize) -> Vec<Mob> {
+        if alive >= MOB_CAP || self.rand01() > SPAWN_CHANCE {
+            return Vec::new();
+        }
+
+        // Pick a pack origin in a ring around the player.
+        let angle = self.rand01() * std::f64::consts::TAU;
+        let radius = SPAWN_MIN_RADIUS + self.rand01() * (SPAWN_MAX_RADIUS - SPAWN_MIN_RADIUS);
+        let (ox, oz) = (px + angle.cos() * radius, pz + angle.sin() * radius);
+
+        let kind = SPAWNABLE[(self.rand01() * SPAWNABLE.len() as f64) as usize];
+        let pack = 1 + (self.rand01() * MAX_PACK as f64) as usize;
+
+        let mut out = Vec::new();
+        for _ in 0..pack {
+            if alive + out.len() >= MOB_CAP {
+                break;
+            }
+            let sx = ox + (self.rand01() - 0.5) * PACK_SPREAD;
+            let sz = oz + (self.rand01() - 0.5) * PACK_SPREAD;
+            out.push(Mob::new(kind, self.next_id, sx, sz));
+            self.next_id += 1;
+        }
+        out
     }
 }
 
