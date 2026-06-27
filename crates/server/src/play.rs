@@ -2,7 +2,7 @@
 //! they move, so the world feels endless (no visible edge).
 
 use std::collections::{HashMap, HashSet};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use leather_protocol::{Nbt, PacketWriter, Result, read_frame, write_frame, write_network_nbt};
 use tokio::io::AsyncWrite;
@@ -32,13 +32,16 @@ const S_PLAYER_ACTION: i32 = 41; // digging
 const S_USE_ITEM_ON: i32 = 66; // placing
 const S_SET_CARRIED_ITEM: i32 = 53; // selected hotbar slot
 const S_SET_CREATIVE_SLOT: i32 = 56; // creative inventory edit
-const S_INTERACT: i32 = 26; // right-click an entity
 const S_ATTACK: i32 = 1; // left-click (attack) an entity
 
-/// The main hand, as sent in the Interact packet's hand field.
-const HAND_MAIN: i32 = 0;
-
 const STATE_AIR: i32 = 0;
+
+/// Damage a bare-handed player melee hit deals at full charge, in half-hearts.
+const MELEE_DAMAGE: f32 = 1.0;
+
+/// Bare-hand attack speed (full-charge hits per second). The attack-strength
+/// meter recharges over `20 / ATTACK_SPEED` ticks.
+const ATTACK_SPEED: f32 = 4.0;
 
 /// Player-inventory container slot of hotbar slot 0 (hotbar is slots 36..=44).
 const HOTBAR_OFFSET: i32 = 36;
@@ -82,11 +85,13 @@ pub async fn handle(
     let (mut center_x, mut center_z) = (0, 0);
     load_around(&mut writer, center_x, center_z, &mut loaded, biome, world).await?;
 
-    // Spawn a demo mob near the player (its chunk is loaded above) and pace it
-    // back and forth so the player sees a moving entity.
-    let mut mob = crate::entity::DemoMob::pig();
-    mob.spawn(&mut writer).await?;
-    mob.send_metadata(&mut writer).await?;
+    // Spawn a small herd near the player (their chunk is loaded above) and pace
+    // them back and forth so the player sees moving entities.
+    let mut mobs = crate::mob::Mob::herd();
+    for m in &mobs {
+        m.spawn(&mut writer).await?;
+        m.update_name(&mut writer).await?; // TEMP debug: show health above mobs
+    }
     let mut mob_interval = tokio::time::interval(Duration::from_millis(50));
     mob_interval.tick().await; // consume the immediate first tick
 
@@ -98,6 +103,12 @@ pub async fn handle(
     interval.tick().await; // consume the immediate first tick
     let mut keep_alive_id: i64 = 1;
 
+    // When the player last hit something, for the 1.9+ attack-cooldown scaling.
+    let mut last_attack: Option<Instant> = None;
+    // Player vertical state, to detect critical hits (falling, full charge).
+    let mut player_y = 64.0_f64;
+    let mut player_falling = false;
+
     loop {
         tokio::select! {
             incoming = read_frame(&mut reader) => {
@@ -107,11 +118,21 @@ pub async fn handle(
                 };
                 let Ok(id) = frame.read_varint() else { continue };
                 match id {
-                    // Stream new chunks when the player crosses into a new chunk.
+                    // Stream new chunks when the player crosses into a new chunk,
+                    // and track vertical state (for critical hits).
                     S_MOVE_POS | S_MOVE_POS_ROT => {
-                        if let (Ok(x), Ok(_y), Ok(z)) =
+                        if let (Ok(x), Ok(y), Ok(z)) =
                             (frame.read_f64(), frame.read_f64(), frame.read_f64())
                         {
+                            // move_pos_rot has yaw+pitch before the flags byte.
+                            if id == S_MOVE_POS_ROT {
+                                let _ = (frame.read_f32(), frame.read_f32());
+                            }
+                            let on_ground = frame.read_u8().map(|f| f & 0x01 != 0).unwrap_or(true);
+                            // Falling = airborne and moving downward (crit window).
+                            player_falling = !on_ground && y < player_y;
+                            player_y = y;
+
                             let (cx, cz) = chunk_of(x, z);
                             if cx != center_x || cz != center_z {
                                 center_x = cx;
@@ -189,26 +210,47 @@ pub async fn handle(
                             }
                         }
                     }
-                    // Left-click (attack) the demo mob: play the hurt reaction.
-                    // In 1.26.1+ attack is its own packet (just the target id).
+                    // Left-click (attack) a mob: it takes damage and flashes red;
+                    // once its health runs out it dies and is removed. No more
+                    // one-shot. In 1.26.1+ attack is its own packet (target id).
                     S_ATTACK => {
                         if let Ok(target) = frame.read_varint()
-                            && target == mob.id()
+                            && let Some(i) =
+                                mobs.iter().position(|m| m.id() == target && !m.is_dying())
                         {
-                            mob.hurt(&mut writer, generic_damage).await?;
-                        }
-                    }
-                    // Right-click (interact) the demo mob: it oinks. The client
-                    // sends this twice per click (one per hand), so we react only
-                    // on the main hand to oink once.
-                    S_INTERACT => {
-                        if let (Ok(target), Ok(hand)) =
-                            (frame.read_varint(), frame.read_varint())
-                            && target == mob.id()
-                            && hand == HAND_MAIN
-                        {
-                            let line = format!("<{}> oink!", crate::entity::MOB_NAME);
-                            send_system_chat(&mut writer, &line).await?;
+                            // 1.9+ attack cooldown: hitting before the meter has
+                            // recharged deals far less damage, so spamming barely
+                            // hurts. multiplier = 0.2 + ((t+0.5)/T)^2 * 0.8 (0.2..1),
+                            // t = ticks since last hit, T = 20/attack_speed.
+                            let now = Instant::now();
+                            let elapsed_ticks = last_attack
+                                .map(|prev| now.duration_since(prev).as_secs_f32() * 20.0)
+                                .unwrap_or(f32::INFINITY);
+                            last_attack = Some(now);
+                            let cooldown = 20.0 / ATTACK_SPEED;
+                            let charge = ((elapsed_ticks + 0.5) / cooldown).clamp(0.0, 1.0);
+                            let mut damage = MELEE_DAMAGE * (0.2 + charge * charge * 0.8);
+
+                            // Critical hit: full charge while falling → +50% + stars.
+                            let crit = charge > 0.9 && player_falling;
+                            if crit {
+                                damage *= 1.5;
+                            }
+
+                            // Only a hit that beats damage immunity has any effect.
+                            if let crate::mob::Hit::Damaged { died } =
+                                mobs[i].take_damage(damage)
+                            {
+                                mobs[i].hurt(&mut writer, generic_damage).await?;
+                                if crit {
+                                    mobs[i].play_crit(&mut writer).await?;
+                                }
+                                if died {
+                                    mobs[i].start_dying(&mut writer).await?;
+                                } else {
+                                    mobs[i].update_name(&mut writer).await?; // TEMP debug
+                                }
+                            }
                         }
                     }
                     _ => {}
@@ -223,8 +265,13 @@ pub async fn handle(
                 }
             }
             _ = mob_interval.tick() => {
-                if mob.tick(&mut writer).await.is_err() {
-                    return Ok(());
+                let mut i = 0;
+                while i < mobs.len() {
+                    match mobs[i].tick(&mut writer).await {
+                        Ok(true) => { mobs.remove(i); } // death animation finished
+                        Ok(false) => i += 1,
+                        Err(_) => return Ok(()),
+                    }
                 }
             }
         }
