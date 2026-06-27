@@ -91,6 +91,18 @@ const REACH_DISTANCE: f64 = 0.4;
 /// The mob walks only when its body is within this many degrees of its heading.
 const ALIGN_THRESHOLD: f64 = 60.0;
 
+/// Knockback when hit: a shove away from the attacker plus a small upward pop
+/// (blocks per tick), then gravity and ground friction bring it to rest.
+const KNOCKBACK_H: f64 = 0.4;
+const KNOCKBACK_V: f64 = 0.4;
+const GRAVITY: f64 = 0.08;
+/// Horizontal velocity retained per tick (ground friction): knockback slides out.
+const FRICTION: f64 = 0.6;
+/// The flat world's surface: mobs rest here and land back on it.
+const GROUND_Y: f64 = 64.0;
+/// Below this horizontal speed (and on the ground) the mob is "settled" again.
+const SETTLED_SPEED: f64 = 0.05;
+
 /// Rotation model, matching vanilla (`LivingEntity::tickHeadTurn`): the head
 /// turns toward the heading at up to `HEAD_TURN` per tick, the body eases toward
 /// the head by `BODY_FOLLOW` of the gap, and the head may never stray more than
@@ -109,6 +121,10 @@ pub struct Mob {
     x: f64,
     y: f64,
     z: f64,
+    /// Velocity (blocks/tick), used for knockback; decays via gravity + friction.
+    vx: f64,
+    vy: f64,
+    vz: f64,
     /// Current movement target (x, z), if the mob is heading somewhere.
     target: Option<(f64, f64)>,
     /// Ticks to wait before picking the next stroll target.
@@ -141,8 +157,11 @@ impl Mob {
             // Distinct, stable per-entity UUID derived from the id.
             uuid: 0x1ea7_e12c_0000_0000_0000_0000_0000_0000 + entity_id as u128,
             x,
-            y: 64.0,
+            y: GROUND_Y,
             z,
+            vx: 0.0,
+            vy: 0.0,
+            vz: 0.0,
             target: None,
             idle_ticks: 0,
             panic_ticks: 0,
@@ -286,6 +305,16 @@ impl Mob {
         write_frame(writer, &w.into_body()).await
     }
 
+    /// Applies knockback away from `(from_x, from_z)`: a horizontal shove plus a
+    /// small upward pop. Gravity and friction in `tick` bring it back to rest.
+    pub fn knockback(&mut self, from_x: f64, from_z: f64) {
+        let (dx, dz) = (self.x - from_x, self.z - from_z);
+        let len = (dx * dx + dz * dz).sqrt().max(0.001);
+        self.vx = dx / len * KNOCKBACK_H;
+        self.vz = dz / len * KNOCKBACK_H;
+        self.vy = KNOCKBACK_V;
+    }
+
     /// Reacts to being hurt: panic for a random 4–12 seconds (vanilla-ish
     /// PanicGoal), bolting around in random directions the whole time.
     pub fn panic(&mut self) {
@@ -348,6 +377,26 @@ impl Mob {
             self.panic_ticks -= 1;
         }
 
+        // Knockback physics: slide with the current velocity, fall under gravity,
+        // land on the ground, and lose horizontal speed to friction.
+        self.x += self.vx;
+        self.y += self.vy;
+        self.z += self.vz;
+        self.vy -= GRAVITY;
+        if self.y <= GROUND_Y {
+            self.y = GROUND_Y;
+            if self.vy < 0.0 {
+                self.vy = 0.0;
+            }
+        }
+        self.vx *= FRICTION;
+        self.vz *= FRICTION;
+        // While still being shoved (airborne or sliding) the mob can't steer.
+        let knocked = self.y > GROUND_Y || self.vx.hypot(self.vz) > SETTLED_SPEED;
+        if knocked {
+            return self.send_position(writer).await.map(|()| false);
+        }
+
         // Decide where to go. While panicking, keep running: pick a fresh flee
         // point ahead whenever the last is reached. Otherwise stroll, with an idle
         // pause between targets. Panic ends only when its timer runs out.
@@ -395,20 +444,24 @@ impl Mob {
             self.head_yaw = approach_angle(self.head_yaw, self.body_yaw, IDLE_HEAD_RELAX);
         }
 
+        self.send_position(writer).await?;
+        Ok(false)
+    }
+
+    /// Sends the mob's current absolute position (and body/head yaw) to the client.
+    async fn send_position<W: AsyncWrite + Unpin>(&self, writer: &mut W) -> Result<()> {
         let mut sync = PacketWriter::new(P_ENTITY_POSITION_SYNC);
         sync.write_varint(self.entity_id);
         sync.write_f64(self.x).write_f64(self.y).write_f64(self.z);
         sync.write_f64(0.0).write_f64(0.0).write_f64(0.0); // velocity (delta)
         sync.write_f32(self.body_yaw as f32).write_f32(0.0); // yaw (body), pitch
-        sync.write_bool(true); // on_ground
+        sync.write_bool(self.y <= GROUND_Y); // on_ground
         write_frame(writer, &sync.into_body()).await?;
 
         let mut head = PacketWriter::new(P_ROTATE_HEAD);
         head.write_varint(self.entity_id);
         head.write_u8(yaw_to_angle(self.head_yaw));
-        write_frame(writer, &head.into_body()).await?;
-
-        Ok(false)
+        write_frame(writer, &head.into_body()).await
     }
 }
 

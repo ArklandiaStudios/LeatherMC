@@ -105,7 +105,9 @@ pub async fn handle(
 
     // When the player last hit something, for the 1.9+ attack-cooldown scaling.
     let mut last_attack: Option<Instant> = None;
-    // Player vertical state, to detect critical hits (falling, full charge).
+    // Player position/vertical state, for critical hits and knockback direction.
+    let mut player_x = 0.0_f64;
+    let mut player_z = 0.0_f64;
     let mut player_y = 64.0_f64;
     let mut player_falling = false;
 
@@ -131,6 +133,8 @@ pub async fn handle(
                             let on_ground = frame.read_u8().map(|f| f & 0x01 != 0).unwrap_or(true);
                             // Falling = airborne and moving downward (crit window).
                             player_falling = !on_ground && y < player_y;
+                            player_x = x;
+                            player_z = z;
                             player_y = y;
 
                             let (cx, cz) = chunk_of(x, z);
@@ -245,6 +249,7 @@ pub async fn handle(
                                 if crit {
                                     mobs[i].play_crit(&mut writer).await?;
                                 }
+                                mobs[i].knockback(player_x, player_z); // shove it back
                                 if died {
                                     mobs[i].start_dying(&mut writer).await?;
                                 } else {
