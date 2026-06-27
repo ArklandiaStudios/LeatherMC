@@ -248,6 +248,7 @@ pub async fn handle(
                                 if died {
                                     mobs[i].start_dying(&mut writer).await?;
                                 } else {
+                                    mobs[i].panic(); // bolt around in a frenzy
                                     mobs[i].update_name(&mut writer).await?; // TEMP debug
                                 }
                             }

@@ -72,11 +72,24 @@ pub const CHICKEN: MobKind = MobKind {
     max_health: 4.0,
 };
 
-/// How far a mob may stray from spawn along X, and how far it steps per tick
-/// (at 20 ticks/second, like vanilla). Placeholder pacing until the AI brick.
-const MIN_X: f64 = 3.0;
-const MAX_X: f64 = 8.0;
-const STEP: f64 = 0.15;
+/// Wander AI tuning (movement is in blocks per tick, at 20 ticks/second).
+/// These are tuned by eye for now; once we model the movement-speed attribute
+/// and friction, panic will derive from walk via vanilla's 1.25× modifier.
+const WALK_SPEED: f64 = 0.12;
+const PANIC_SPEED: f64 = 0.25;
+/// How far from its home a mob strolls.
+const WANDER_RADIUS: f64 = 8.0;
+/// Each panic dash is a short hop this many blocks, in a random direction, so a
+/// panicking mob bolts around frantically.
+const FLEE_MIN_DASH: f64 = 2.0;
+const FLEE_MAX_DASH: f64 = 5.0;
+/// Panic lasts a random 4–12 seconds (at 20 ticks/second).
+const PANIC_MIN_TICKS: u32 = 80;
+const PANIC_MAX_TICKS: u32 = 240;
+/// Distance at which a movement target counts as reached.
+const REACH_DISTANCE: f64 = 0.4;
+/// The mob walks only when its body is within this many degrees of its heading.
+const ALIGN_THRESHOLD: f64 = 60.0;
 
 /// Rotation model, matching vanilla (`LivingEntity::tickHeadTurn`): the head
 /// turns toward the heading at up to `HEAD_TURN` per tick, the body eases toward
@@ -85,7 +98,8 @@ const STEP: f64 = 0.15;
 const HEAD_TURN: f64 = 40.0;
 const BODY_FOLLOW: f64 = 0.5;
 const MAX_HEAD_YAW: f64 = 75.0;
-const ALIGN_THRESHOLD: f64 = 45.0;
+/// How fast an idle mob's head drifts back to face its body.
+const IDLE_HEAD_RELAX: f64 = 8.0;
 
 /// A living entity in the world.
 pub struct Mob {
@@ -95,8 +109,14 @@ pub struct Mob {
     x: f64,
     y: f64,
     z: f64,
-    /// Walking direction along X (placeholder pacing): `+1.0` east / `-1.0` west.
-    dir: f64,
+    /// Current movement target (x, z), if the mob is heading somewhere.
+    target: Option<(f64, f64)>,
+    /// Ticks to wait before picking the next stroll target.
+    idle_ticks: u32,
+    /// Ticks of panic (fleeing fast) left after being hurt.
+    panic_ticks: u32,
+    /// Per-mob PRNG state (xorshift), for wander/idle decisions.
+    rng: u64,
     /// Current body and head headings, in degrees, eased toward the target.
     body_yaw: f64,
     head_yaw: f64,
@@ -123,7 +143,11 @@ impl Mob {
             x,
             y: 64.0,
             z,
-            dir: 1.0,
+            target: None,
+            idle_ticks: 0,
+            panic_ticks: 0,
+            // Seed the PRNG from the id so each mob wanders differently (nonzero).
+            rng: 0x9E37_79B9_7F4A_7C15 ^ (entity_id as u64).wrapping_mul(0x2545_F491_4F6C_DD1D),
             body_yaw: -90.0, // east
             head_yaw: -90.0,
             health: kind.max_health,
@@ -138,9 +162,9 @@ impl Mob {
     /// ids start at 2 (the player is 1).
     pub fn herd() -> Vec<Mob> {
         vec![
-            Mob::new(&PIG, 2, MIN_X, -2.0),
-            Mob::new(&COW, 3, MIN_X + 1.0, 0.0),
-            Mob::new(&CHICKEN, 4, MIN_X + 2.0, 2.0),
+            Mob::new(&PIG, 2, 5.0, -3.0),
+            Mob::new(&COW, 3, 5.0, 0.0),
+            Mob::new(&CHICKEN, 4, 5.0, 3.0),
         ]
     }
 
@@ -262,10 +286,43 @@ impl Mob {
         write_frame(writer, &w.into_body()).await
     }
 
-    /// The heading the mob currently wants to face, in degrees (clockwise from
-    /// south): east (+x) = -90°, west (-x) = +90°.
-    fn target_yaw(&self) -> f64 {
-        if self.dir > 0.0 { -90.0 } else { 90.0 }
+    /// Reacts to being hurt: panic for a random 4–12 seconds (vanilla-ish
+    /// PanicGoal), bolting around in random directions the whole time.
+    pub fn panic(&mut self) {
+        let span = PANIC_MAX_TICKS - PANIC_MIN_TICKS;
+        self.panic_ticks = PANIC_MIN_TICKS + (self.rand01() * span as f64) as u32;
+        self.pick_flee_target();
+    }
+
+    /// Next PRNG value (xorshift64).
+    fn next_rng(&mut self) -> u64 {
+        let mut x = self.rng;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.rng = x;
+        x
+    }
+
+    /// A pseudo-random float in `[0, 1)`.
+    fn rand01(&mut self) -> f64 {
+        (self.next_rng() >> 11) as f64 / (1u64 << 53) as f64
+    }
+
+    /// Picks a random stroll target near the mob's current position (so it
+    /// wanders wherever it is, never drifting back to its spawn).
+    fn pick_wander_target(&mut self) {
+        let angle = self.rand01() * std::f64::consts::TAU;
+        let r = self.rand01() * WANDER_RADIUS;
+        self.target = Some((self.x + angle.cos() * r, self.z + angle.sin() * r));
+    }
+
+    /// Picks the next flee point while panicking: a short dash in a fully random
+    /// direction, so the mob bolts around frantically rather than in one line.
+    fn pick_flee_target(&mut self) {
+        let angle = self.rand01() * std::f64::consts::TAU;
+        let dist = FLEE_MIN_DASH + self.rand01() * (FLEE_MAX_DASH - FLEE_MIN_DASH);
+        self.target = Some((self.x + angle.cos() * dist, self.z + angle.sin() * dist));
     }
 
     /// Advances the mob one tick. While dying, counts down and then removes the
@@ -286,30 +343,56 @@ impl Mob {
         if self.invulnerable > 0 {
             self.invulnerable -= 1;
         }
-
-        let target = self.target_yaw();
-
-        // Head turns toward the heading, fast but rate-limited.
-        self.head_yaw = approach_angle(self.head_yaw, target, HEAD_TURN);
-        // Body eases toward the head...
-        self.body_yaw += angle_diff(self.body_yaw, self.head_yaw) * BODY_FOLLOW;
-        // ...but the head may not stray more than 75° from the body; past that,
-        // drag the body along so the head stays "on the shoulders".
-        let off = angle_diff(self.body_yaw, self.head_yaw);
-        if off.abs() > MAX_HEAD_YAW {
-            self.body_yaw = self.head_yaw - MAX_HEAD_YAW * off.signum();
+        let panicking = self.panic_ticks > 0;
+        if panicking {
+            self.panic_ticks -= 1;
         }
 
-        // Walk only when roughly facing where we're going, so it turns at each end.
-        if angle_diff(self.head_yaw, target).abs() < ALIGN_THRESHOLD {
-            self.x += STEP * self.dir;
-            if self.x >= MAX_X {
-                self.x = MAX_X;
-                self.dir = -1.0;
-            } else if self.x <= MIN_X {
-                self.x = MIN_X;
-                self.dir = 1.0;
+        // Decide where to go. While panicking, keep running: pick a fresh flee
+        // point ahead whenever the last is reached. Otherwise stroll, with an idle
+        // pause between targets. Panic ends only when its timer runs out.
+        if panicking {
+            if self.target.is_none() {
+                self.pick_flee_target();
             }
+        } else if self.target.is_none() {
+            if self.idle_ticks > 0 {
+                self.idle_ticks -= 1;
+            } else {
+                self.pick_wander_target();
+            }
+        }
+
+        // Steer toward the target (if any) and move when roughly facing it.
+        if let Some((tx, tz)) = self.target {
+            let (dx, dz) = (tx - self.x, tz - self.z);
+            let dist = (dx * dx + dz * dz).sqrt();
+            if dist < REACH_DISTANCE {
+                self.target = None;
+                // Strolling pauses between targets; panic immediately re-aims.
+                if !panicking {
+                    self.idle_ticks = 20 + (self.rand01() * 60.0) as u32;
+                }
+            } else {
+                // Yaw toward the movement direction (0° = +z south, -90° = +x east).
+                let heading = -dx.atan2(dz).to_degrees();
+                self.head_yaw = approach_angle(self.head_yaw, heading, HEAD_TURN);
+                self.body_yaw += angle_diff(self.body_yaw, self.head_yaw) * BODY_FOLLOW;
+                let off = angle_diff(self.body_yaw, self.head_yaw);
+                if off.abs() > MAX_HEAD_YAW {
+                    self.body_yaw = self.head_yaw - MAX_HEAD_YAW * off.signum();
+                }
+                // Walk once roughly facing the way we're going.
+                if angle_diff(self.body_yaw, heading).abs() < ALIGN_THRESHOLD {
+                    let speed = if panicking { PANIC_SPEED } else { WALK_SPEED };
+                    let step = speed.min(dist);
+                    self.x += dx / dist * step;
+                    self.z += dz / dist * step;
+                }
+            }
+        } else {
+            // Idle: let the head drift back to face the body.
+            self.head_yaw = approach_angle(self.head_yaw, self.body_yaw, IDLE_HEAD_RELAX);
         }
 
         let mut sync = PacketWriter::new(P_ENTITY_POSITION_SYNC);
