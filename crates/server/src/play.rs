@@ -85,9 +85,9 @@ pub async fn handle(
     let (mut center_x, mut center_z) = (0, 0);
     load_around(&mut writer, center_x, center_z, &mut loaded, biome, world).await?;
 
-    // Spawn a small herd near the player (their chunk is loaded above) and pace
-    // them back and forth so the player sees moving entities.
-    let mut mobs = crate::mob::Mob::herd();
+    // Showcase one of every mob kind in a grid near the player (the chunks are
+    // loaded above) so they can all be seen. Temporary until the spawning engine.
+    let mut mobs = crate::mob::Mob::showcase();
     for m in &mobs {
         m.spawn(&mut writer).await?;
         m.update_name(&mut writer).await?; // TEMP debug: show health above mobs
@@ -253,7 +253,7 @@ pub async fn handle(
                                 if died {
                                     mobs[i].start_dying(&mut writer).await?;
                                 } else {
-                                    mobs[i].panic(); // bolt around in a frenzy
+                                    mobs[i].provoke(); // flee, or get angry and chase
                                     mobs[i].update_name(&mut writer).await?; // TEMP debug
                                 }
                             }
@@ -273,7 +273,7 @@ pub async fn handle(
             _ = mob_interval.tick() => {
                 let mut i = 0;
                 while i < mobs.len() {
-                    match mobs[i].tick(&mut writer).await {
+                    match mobs[i].tick(&mut writer, player_x, player_z).await {
                         Ok(true) => { mobs.remove(i); } // death animation finished
                         Ok(false) => i += 1,
                         Err(_) => return Ok(()),

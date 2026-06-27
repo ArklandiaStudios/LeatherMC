@@ -48,29 +48,138 @@ pub enum Hit {
     Damaged { died: bool },
 }
 
+/// How a mob behaves toward the player.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Behavior {
+    /// Wanders and flees when hurt (most animals).
+    Passive,
+    /// Wanders peacefully but chases the player once provoked (wolf, bee…).
+    Neutral,
+    /// Chases the player on sight (zombie, creeper…).
+    Hostile,
+}
+
 /// A kind of mob and its stats. `entity_type` is the built-in protocol id from
 /// `registries.json`; `max_health` is the vanilla value (in half-hearts).
 pub struct MobKind {
     pub name: &'static str,
     pub entity_type: i32,
     pub max_health: f32,
+    pub behavior: Behavior,
 }
 
-pub const PIG: MobKind = MobKind {
-    name: "pig",
-    entity_type: 100,
-    max_health: 10.0,
-};
-pub const COW: MobKind = MobKind {
-    name: "cow",
-    entity_type: 30,
-    max_health: 10.0,
-};
-pub const CHICKEN: MobKind = MobKind {
-    name: "chicken",
-    entity_type: 26,
-    max_health: 4.0,
-};
+/// Every living mob: entity-type protocol id, vanilla max health (half-hearts)
+/// and its AI behaviour. Health/behaviour are standard-vanilla approximations;
+/// newer 26.2 mobs are best-effort and will be refined.
+pub const ALLAY: MobKind = MobKind { name: "allay", entity_type: 2, max_health: 20.0, behavior: Behavior::Passive };
+pub const ARMADILLO: MobKind = MobKind { name: "armadillo", entity_type: 4, max_health: 12.0, behavior: Behavior::Passive };
+pub const AXOLOTL: MobKind = MobKind { name: "axolotl", entity_type: 7, max_health: 14.0, behavior: Behavior::Passive };
+pub const BAT: MobKind = MobKind { name: "bat", entity_type: 10, max_health: 6.0, behavior: Behavior::Passive };
+pub const BEE: MobKind = MobKind { name: "bee", entity_type: 11, max_health: 10.0, behavior: Behavior::Neutral };
+pub const BLAZE: MobKind = MobKind { name: "blaze", entity_type: 14, max_health: 20.0, behavior: Behavior::Hostile };
+pub const BOGGED: MobKind = MobKind { name: "bogged", entity_type: 16, max_health: 16.0, behavior: Behavior::Hostile };
+pub const BREEZE: MobKind = MobKind { name: "breeze", entity_type: 17, max_health: 30.0, behavior: Behavior::Hostile };
+pub const CAMEL: MobKind = MobKind { name: "camel", entity_type: 19, max_health: 32.0, behavior: Behavior::Passive };
+pub const CAMEL_HUSK: MobKind = MobKind { name: "camel_husk", entity_type: 20, max_health: 32.0, behavior: Behavior::Neutral }; // new in 26.2
+pub const CAT: MobKind = MobKind { name: "cat", entity_type: 21, max_health: 10.0, behavior: Behavior::Passive };
+pub const CAVE_SPIDER: MobKind = MobKind { name: "cave_spider", entity_type: 22, max_health: 12.0, behavior: Behavior::Hostile };
+pub const CHICKEN: MobKind = MobKind { name: "chicken", entity_type: 26, max_health: 4.0, behavior: Behavior::Passive };
+pub const COD: MobKind = MobKind { name: "cod", entity_type: 27, max_health: 3.0, behavior: Behavior::Passive };
+pub const COPPER_GOLEM: MobKind = MobKind { name: "copper_golem", entity_type: 28, max_health: 20.0, behavior: Behavior::Passive }; // new in 26.2
+pub const COW: MobKind = MobKind { name: "cow", entity_type: 30, max_health: 10.0, behavior: Behavior::Passive };
+pub const CREAKING: MobKind = MobKind { name: "creaking", entity_type: 31, max_health: 20.0, behavior: Behavior::Hostile }; // new in 26.2
+pub const CREEPER: MobKind = MobKind { name: "creeper", entity_type: 32, max_health: 20.0, behavior: Behavior::Hostile };
+pub const DOLPHIN: MobKind = MobKind { name: "dolphin", entity_type: 35, max_health: 10.0, behavior: Behavior::Neutral };
+pub const DONKEY: MobKind = MobKind { name: "donkey", entity_type: 36, max_health: 15.0, behavior: Behavior::Passive };
+pub const DROWNED: MobKind = MobKind { name: "drowned", entity_type: 38, max_health: 20.0, behavior: Behavior::Hostile };
+pub const ELDER_GUARDIAN: MobKind = MobKind { name: "elder_guardian", entity_type: 40, max_health: 80.0, behavior: Behavior::Hostile };
+pub const ENDER_DRAGON: MobKind = MobKind { name: "ender_dragon", entity_type: 43, max_health: 200.0, behavior: Behavior::Hostile };
+pub const ENDERMAN: MobKind = MobKind { name: "enderman", entity_type: 41, max_health: 40.0, behavior: Behavior::Neutral };
+pub const ENDERMITE: MobKind = MobKind { name: "endermite", entity_type: 42, max_health: 8.0, behavior: Behavior::Hostile };
+pub const EVOKER: MobKind = MobKind { name: "evoker", entity_type: 46, max_health: 24.0, behavior: Behavior::Hostile };
+pub const FOX: MobKind = MobKind { name: "fox", entity_type: 54, max_health: 10.0, behavior: Behavior::Passive };
+pub const FROG: MobKind = MobKind { name: "frog", entity_type: 55, max_health: 10.0, behavior: Behavior::Passive };
+pub const GHAST: MobKind = MobKind { name: "ghast", entity_type: 57, max_health: 10.0, behavior: Behavior::Hostile };
+pub const GIANT: MobKind = MobKind { name: "giant", entity_type: 59, max_health: 100.0, behavior: Behavior::Hostile };
+pub const GLOW_SQUID: MobKind = MobKind { name: "glow_squid", entity_type: 61, max_health: 10.0, behavior: Behavior::Passive };
+pub const GOAT: MobKind = MobKind { name: "goat", entity_type: 62, max_health: 10.0, behavior: Behavior::Neutral };
+pub const GUARDIAN: MobKind = MobKind { name: "guardian", entity_type: 63, max_health: 30.0, behavior: Behavior::Hostile };
+pub const HAPPY_GHAST: MobKind = MobKind { name: "happy_ghast", entity_type: 58, max_health: 20.0, behavior: Behavior::Passive }; // new in 26.2
+pub const HOGLIN: MobKind = MobKind { name: "hoglin", entity_type: 64, max_health: 40.0, behavior: Behavior::Hostile };
+pub const HORSE: MobKind = MobKind { name: "horse", entity_type: 66, max_health: 30.0, behavior: Behavior::Passive };
+pub const HUSK: MobKind = MobKind { name: "husk", entity_type: 67, max_health: 20.0, behavior: Behavior::Hostile };
+pub const ILLUSIONER: MobKind = MobKind { name: "illusioner", entity_type: 68, max_health: 32.0, behavior: Behavior::Hostile };
+pub const IRON_GOLEM: MobKind = MobKind { name: "iron_golem", entity_type: 70, max_health: 100.0, behavior: Behavior::Neutral };
+pub const LLAMA: MobKind = MobKind { name: "llama", entity_type: 78, max_health: 30.0, behavior: Behavior::Neutral };
+pub const MAGMA_CUBE: MobKind = MobKind { name: "magma_cube", entity_type: 80, max_health: 16.0, behavior: Behavior::Hostile };
+pub const MOOSHROOM: MobKind = MobKind { name: "mooshroom", entity_type: 86, max_health: 10.0, behavior: Behavior::Passive };
+pub const MULE: MobKind = MobKind { name: "mule", entity_type: 87, max_health: 15.0, behavior: Behavior::Passive };
+pub const NAUTILUS: MobKind = MobKind { name: "nautilus", entity_type: 88, max_health: 20.0, behavior: Behavior::Neutral }; // new in 26.2
+pub const OCELOT: MobKind = MobKind { name: "ocelot", entity_type: 91, max_health: 10.0, behavior: Behavior::Passive };
+pub const PANDA: MobKind = MobKind { name: "panda", entity_type: 96, max_health: 20.0, behavior: Behavior::Neutral };
+pub const PARCHED: MobKind = MobKind { name: "parched", entity_type: 97, max_health: 20.0, behavior: Behavior::Hostile }; // new in 26.2
+pub const PARROT: MobKind = MobKind { name: "parrot", entity_type: 98, max_health: 6.0, behavior: Behavior::Passive };
+pub const PHANTOM: MobKind = MobKind { name: "phantom", entity_type: 99, max_health: 20.0, behavior: Behavior::Hostile };
+pub const PIG: MobKind = MobKind { name: "pig", entity_type: 100, max_health: 10.0, behavior: Behavior::Passive };
+pub const PIGLIN: MobKind = MobKind { name: "piglin", entity_type: 101, max_health: 16.0, behavior: Behavior::Neutral };
+pub const PIGLIN_BRUTE: MobKind = MobKind { name: "piglin_brute", entity_type: 102, max_health: 50.0, behavior: Behavior::Hostile };
+pub const PILLAGER: MobKind = MobKind { name: "pillager", entity_type: 103, max_health: 24.0, behavior: Behavior::Hostile };
+pub const POLAR_BEAR: MobKind = MobKind { name: "polar_bear", entity_type: 104, max_health: 30.0, behavior: Behavior::Neutral };
+pub const PUFFERFISH: MobKind = MobKind { name: "pufferfish", entity_type: 107, max_health: 3.0, behavior: Behavior::Passive };
+pub const RABBIT: MobKind = MobKind { name: "rabbit", entity_type: 108, max_health: 3.0, behavior: Behavior::Passive };
+pub const RAVAGER: MobKind = MobKind { name: "ravager", entity_type: 109, max_health: 100.0, behavior: Behavior::Hostile };
+pub const SALMON: MobKind = MobKind { name: "salmon", entity_type: 110, max_health: 3.0, behavior: Behavior::Passive };
+pub const SHEEP: MobKind = MobKind { name: "sheep", entity_type: 111, max_health: 8.0, behavior: Behavior::Passive };
+pub const SHULKER: MobKind = MobKind { name: "shulker", entity_type: 112, max_health: 30.0, behavior: Behavior::Hostile };
+pub const SILVERFISH: MobKind = MobKind { name: "silverfish", entity_type: 114, max_health: 8.0, behavior: Behavior::Hostile };
+pub const SKELETON: MobKind = MobKind { name: "skeleton", entity_type: 115, max_health: 20.0, behavior: Behavior::Hostile };
+pub const SKELETON_HORSE: MobKind = MobKind { name: "skeleton_horse", entity_type: 116, max_health: 15.0, behavior: Behavior::Passive };
+pub const SLIME: MobKind = MobKind { name: "slime", entity_type: 117, max_health: 16.0, behavior: Behavior::Hostile };
+pub const SNIFFER: MobKind = MobKind { name: "sniffer", entity_type: 119, max_health: 14.0, behavior: Behavior::Passive };
+pub const SNOW_GOLEM: MobKind = MobKind { name: "snow_golem", entity_type: 121, max_health: 4.0, behavior: Behavior::Passive };
+pub const SPIDER: MobKind = MobKind { name: "spider", entity_type: 124, max_health: 16.0, behavior: Behavior::Hostile };
+pub const SQUID: MobKind = MobKind { name: "squid", entity_type: 127, max_health: 10.0, behavior: Behavior::Passive };
+pub const STRAY: MobKind = MobKind { name: "stray", entity_type: 128, max_health: 20.0, behavior: Behavior::Hostile };
+pub const STRIDER: MobKind = MobKind { name: "strider", entity_type: 129, max_health: 20.0, behavior: Behavior::Passive };
+pub const SULFUR_CUBE: MobKind = MobKind { name: "sulfur_cube", entity_type: 130, max_health: 16.0, behavior: Behavior::Hostile }; // new in 26.2
+pub const TADPOLE: MobKind = MobKind { name: "tadpole", entity_type: 131, max_health: 6.0, behavior: Behavior::Passive };
+pub const TRADER_LLAMA: MobKind = MobKind { name: "trader_llama", entity_type: 135, max_health: 30.0, behavior: Behavior::Neutral };
+pub const TROPICAL_FISH: MobKind = MobKind { name: "tropical_fish", entity_type: 137, max_health: 3.0, behavior: Behavior::Passive };
+pub const TURTLE: MobKind = MobKind { name: "turtle", entity_type: 138, max_health: 30.0, behavior: Behavior::Passive };
+pub const VEX: MobKind = MobKind { name: "vex", entity_type: 139, max_health: 14.0, behavior: Behavior::Hostile };
+pub const VILLAGER: MobKind = MobKind { name: "villager", entity_type: 140, max_health: 20.0, behavior: Behavior::Passive };
+pub const VINDICATOR: MobKind = MobKind { name: "vindicator", entity_type: 141, max_health: 24.0, behavior: Behavior::Hostile };
+pub const WANDERING_TRADER: MobKind = MobKind { name: "wandering_trader", entity_type: 142, max_health: 20.0, behavior: Behavior::Passive };
+pub const WARDEN: MobKind = MobKind { name: "warden", entity_type: 143, max_health: 500.0, behavior: Behavior::Hostile };
+pub const WITCH: MobKind = MobKind { name: "witch", entity_type: 145, max_health: 26.0, behavior: Behavior::Hostile };
+pub const WITHER: MobKind = MobKind { name: "wither", entity_type: 146, max_health: 300.0, behavior: Behavior::Hostile };
+pub const WITHER_SKELETON: MobKind = MobKind { name: "wither_skeleton", entity_type: 147, max_health: 20.0, behavior: Behavior::Hostile };
+pub const WOLF: MobKind = MobKind { name: "wolf", entity_type: 149, max_health: 8.0, behavior: Behavior::Neutral };
+pub const ZOGLIN: MobKind = MobKind { name: "zoglin", entity_type: 150, max_health: 40.0, behavior: Behavior::Hostile };
+pub const ZOMBIE: MobKind = MobKind { name: "zombie", entity_type: 151, max_health: 20.0, behavior: Behavior::Hostile };
+pub const ZOMBIE_HORSE: MobKind = MobKind { name: "zombie_horse", entity_type: 152, max_health: 15.0, behavior: Behavior::Passive };
+pub const ZOMBIE_NAUTILUS: MobKind = MobKind { name: "zombie_nautilus", entity_type: 153, max_health: 20.0, behavior: Behavior::Neutral }; // new in 26.2
+pub const ZOMBIE_VILLAGER: MobKind = MobKind { name: "zombie_villager", entity_type: 154, max_health: 20.0, behavior: Behavior::Hostile };
+pub const ZOMBIFIED_PIGLIN: MobKind = MobKind { name: "zombified_piglin", entity_type: 155, max_health: 20.0, behavior: Behavior::Neutral };
+
+/// All mob kinds, for spawning and the showcase.
+pub const ALL_MOBS: &[&MobKind] = &[
+    &ALLAY, &ARMADILLO, &AXOLOTL, &BAT, &BEE, &BLAZE,
+    &BOGGED, &BREEZE, &CAMEL, &CAMEL_HUSK, &CAT, &CAVE_SPIDER,
+    &CHICKEN, &COD, &COPPER_GOLEM, &COW, &CREAKING, &CREEPER,
+    &DOLPHIN, &DONKEY, &DROWNED, &ELDER_GUARDIAN, &ENDER_DRAGON, &ENDERMAN,
+    &ENDERMITE, &EVOKER, &FOX, &FROG, &GHAST, &GIANT,
+    &GLOW_SQUID, &GOAT, &GUARDIAN, &HAPPY_GHAST, &HOGLIN, &HORSE,
+    &HUSK, &ILLUSIONER, &IRON_GOLEM, &LLAMA, &MAGMA_CUBE, &MOOSHROOM,
+    &MULE, &NAUTILUS, &OCELOT, &PANDA, &PARCHED, &PARROT,
+    &PHANTOM, &PIG, &PIGLIN, &PIGLIN_BRUTE, &PILLAGER, &POLAR_BEAR,
+    &PUFFERFISH, &RABBIT, &RAVAGER, &SALMON, &SHEEP, &SHULKER,
+    &SILVERFISH, &SKELETON, &SKELETON_HORSE, &SLIME, &SNIFFER, &SNOW_GOLEM,
+    &SPIDER, &SQUID, &STRAY, &STRIDER, &SULFUR_CUBE, &TADPOLE,
+    &TRADER_LLAMA, &TROPICAL_FISH, &TURTLE, &VEX, &VILLAGER, &VINDICATOR,
+    &WANDERING_TRADER, &WARDEN, &WITCH, &WITHER, &WITHER_SKELETON, &WOLF,
+    &ZOGLIN, &ZOMBIE, &ZOMBIE_HORSE, &ZOMBIE_NAUTILUS, &ZOMBIE_VILLAGER, &ZOMBIFIED_PIGLIN,
+];
 
 /// Wander AI tuning (movement is in blocks per tick, at 20 ticks/second).
 /// These are tuned by eye for now; once we model the movement-speed attribute
@@ -90,6 +199,14 @@ const PANIC_MAX_TICKS: u32 = 240;
 const REACH_DISTANCE: f64 = 0.4;
 /// The mob walks only when its body is within this many degrees of its heading.
 const ALIGN_THRESHOLD: f64 = 60.0;
+
+/// Chase AI: hostiles target the player within this range; chasing runs at this
+/// speed and stops at melee range. Neutrals chase while angry (after provoked).
+const DETECT_RANGE: f64 = 16.0;
+const CHASE_SPEED: f64 = 0.23;
+const STOP_DISTANCE: f64 = 1.6;
+/// How long a provoked neutral mob stays angry and chases (ticks ≈ 10s).
+const AGGRO_TICKS: u32 = 200;
 
 /// Knockback when hit: a shove away from the attacker plus a small upward pop
 /// (blocks per tick), then gravity and ground friction bring it to rest.
@@ -131,6 +248,8 @@ pub struct Mob {
     idle_ticks: u32,
     /// Ticks of panic (fleeing fast) left after being hurt.
     panic_ticks: u32,
+    /// Ticks a provoked neutral mob stays angry and chases the player.
+    anger_ticks: u32,
     /// Per-mob PRNG state (xorshift), for wander/idle decisions.
     rng: u64,
     /// Current body and head headings, in degrees, eased toward the target.
@@ -165,6 +284,7 @@ impl Mob {
             target: None,
             idle_ticks: 0,
             panic_ticks: 0,
+            anger_ticks: 0,
             // Seed the PRNG from the id so each mob wanders differently (nonzero).
             rng: 0x9E37_79B9_7F4A_7C15 ^ (entity_id as u64).wrapping_mul(0x2545_F491_4F6C_DD1D),
             body_yaw: -90.0, // east
@@ -176,15 +296,23 @@ impl Mob {
         }
     }
 
-    /// A small mixed herd in parallel lanes, staggered so they don't pace in
-    /// lockstep — enough to show the engine handles several kinds at once. Entity
-    /// ids start at 2 (the player is 1).
-    pub fn herd() -> Vec<Mob> {
-        vec![
-            Mob::new(&PIG, 2, 5.0, -3.0),
-            Mob::new(&COW, 3, 5.0, 0.0),
-            Mob::new(&CHICKEN, 4, 5.0, 3.0),
-        ]
+    /// One of every mob kind, laid out in a grid east of spawn so they can all be
+    /// seen at once. Entity ids start at 2 (the player is 1). Temporary showcase
+    /// until the spawning engine drives population.
+    pub fn showcase() -> Vec<Mob> {
+        const PER_ROW: usize = 10;
+        const SPACING: f64 = 3.0;
+        ALL_MOBS
+            .iter()
+            .enumerate()
+            .map(|(i, kind)| {
+                let col = (i % PER_ROW) as f64;
+                let row = (i / PER_ROW) as f64;
+                let x = 4.0 + col * SPACING;
+                let z = -(PER_ROW as f64) * SPACING / 2.0 + row * SPACING;
+                Mob::new(kind, 2 + i as i32, x, z)
+            })
+            .collect()
     }
 
     /// This mob's entity id, for matching serverbound packets that target it.
@@ -315,12 +443,19 @@ impl Mob {
         self.vy = KNOCKBACK_V;
     }
 
-    /// Reacts to being hurt: panic for a random 4–12 seconds (vanilla-ish
-    /// PanicGoal), bolting around in random directions the whole time.
-    pub fn panic(&mut self) {
-        let span = PANIC_MAX_TICKS - PANIC_MIN_TICKS;
-        self.panic_ticks = PANIC_MIN_TICKS + (self.rand01() * span as f64) as u32;
-        self.pick_flee_target();
+    /// Reacts to being hurt according to the mob's behaviour: passive mobs panic
+    /// and flee; neutral mobs get angry and chase; hostile mobs already chase.
+    pub fn provoke(&mut self) {
+        match self.kind.behavior {
+            Behavior::Passive => {
+                let span = PANIC_MAX_TICKS - PANIC_MIN_TICKS;
+                self.panic_ticks = PANIC_MIN_TICKS + (self.rand01() * span as f64) as u32;
+                self.pick_flee_target();
+            }
+            Behavior::Neutral | Behavior::Hostile => {
+                self.anger_ticks = AGGRO_TICKS;
+            }
+        }
     }
 
     /// Next PRNG value (xorshift64).
@@ -346,6 +481,17 @@ impl Mob {
         self.target = Some((self.x + angle.cos() * r, self.z + angle.sin() * r));
     }
 
+    /// Turns toward `heading` (degrees): the head leads, the body eases to follow,
+    /// and the head stays within 75° of the body (vanilla-style).
+    fn face(&mut self, heading: f64) {
+        self.head_yaw = approach_angle(self.head_yaw, heading, HEAD_TURN);
+        self.body_yaw += angle_diff(self.body_yaw, self.head_yaw) * BODY_FOLLOW;
+        let off = angle_diff(self.body_yaw, self.head_yaw);
+        if off.abs() > MAX_HEAD_YAW {
+            self.body_yaw = self.head_yaw - MAX_HEAD_YAW * off.signum();
+        }
+    }
+
     /// Picks the next flee point while panicking: a short dash in a fully random
     /// direction, so the mob bolts around frantically rather than in one line.
     fn pick_flee_target(&mut self) {
@@ -354,11 +500,16 @@ impl Mob {
         self.target = Some((self.x + angle.cos() * dist, self.z + angle.sin() * dist));
     }
 
-    /// Advances the mob one tick. While dying, counts down and then removes the
-    /// entity; otherwise paces (placeholder) and sends its position and head
-    /// rotation. Returns `true` once the mob should be dropped (death finished).
-    /// Using position sync (absolute) avoids rounding drift.
-    pub async fn tick<W: AsyncWrite + Unpin>(&mut self, writer: &mut W) -> Result<bool> {
+    /// Advances the mob one tick: knockback physics, then AI (chase the player,
+    /// flee in panic, or stroll), then send its position and head rotation. `px`/
+    /// `pz` are the player's position. Returns `true` once the mob should be
+    /// dropped (death animation finished). Position sync avoids rounding drift.
+    pub async fn tick<W: AsyncWrite + Unpin>(
+        &mut self,
+        writer: &mut W,
+        px: f64,
+        pz: f64,
+    ) -> Result<bool> {
         // Dying: hold still, run out the animation, then despawn.
         if let Some(left) = self.death_timer {
             if left == 0 {
@@ -397,43 +548,58 @@ impl Mob {
             return self.send_position(writer).await.map(|()| false);
         }
 
-        // Decide where to go. While panicking, keep running: pick a fresh flee
-        // point ahead whenever the last is reached. Otherwise stroll, with an idle
-        // pause between targets. Panic ends only when its timer runs out.
-        if panicking {
+        // Choose a goal. Chasing (hostile in range, or an angry neutral) beats
+        // panicking (passive fleeing), which beats strolling.
+        let dist_player = (self.x - px).hypot(self.z - pz);
+        if self.anger_ticks > 0 {
+            self.anger_ticks -= 1;
+        }
+        let chasing = match self.kind.behavior {
+            Behavior::Hostile => dist_player <= DETECT_RANGE,
+            Behavior::Neutral => self.anger_ticks > 0 && dist_player <= DETECT_RANGE,
+            Behavior::Passive => false,
+        };
+
+        let speed = if chasing {
+            self.target = Some((px, pz));
+            CHASE_SPEED
+        } else if panicking {
             if self.target.is_none() {
                 self.pick_flee_target();
             }
-        } else if self.target.is_none() {
-            if self.idle_ticks > 0 {
-                self.idle_ticks -= 1;
-            } else {
-                self.pick_wander_target();
+            PANIC_SPEED
+        } else {
+            if self.target.is_none() {
+                if self.idle_ticks > 0 {
+                    self.idle_ticks -= 1;
+                } else {
+                    self.pick_wander_target();
+                }
             }
-        }
+            WALK_SPEED
+        };
 
-        // Steer toward the target (if any) and move when roughly facing it.
+        // Steer toward the target and move when roughly facing it.
         if let Some((tx, tz)) = self.target {
             let (dx, dz) = (tx - self.x, tz - self.z);
             let dist = (dx * dx + dz * dz).sqrt();
-            if dist < REACH_DISTANCE {
-                self.target = None;
-                // Strolling pauses between targets; panic immediately re-aims.
-                if !panicking {
-                    self.idle_ticks = 20 + (self.rand01() * 60.0) as u32;
+            // Chasers stop at melee range; others when they reach the spot.
+            let stop = if chasing { STOP_DISTANCE } else { REACH_DISTANCE };
+            if dist <= stop {
+                if chasing {
+                    // Reached the player: face them but don't overrun.
+                    self.face(-dx.atan2(dz).to_degrees());
+                } else {
+                    self.target = None;
+                    if !panicking {
+                        self.idle_ticks = 20 + (self.rand01() * 60.0) as u32;
+                    }
                 }
             } else {
                 // Yaw toward the movement direction (0° = +z south, -90° = +x east).
                 let heading = -dx.atan2(dz).to_degrees();
-                self.head_yaw = approach_angle(self.head_yaw, heading, HEAD_TURN);
-                self.body_yaw += angle_diff(self.body_yaw, self.head_yaw) * BODY_FOLLOW;
-                let off = angle_diff(self.body_yaw, self.head_yaw);
-                if off.abs() > MAX_HEAD_YAW {
-                    self.body_yaw = self.head_yaw - MAX_HEAD_YAW * off.signum();
-                }
-                // Walk once roughly facing the way we're going.
+                self.face(heading);
                 if angle_diff(self.body_yaw, heading).abs() < ALIGN_THRESHOLD {
-                    let speed = if panicking { PANIC_SPEED } else { WALK_SPEED };
                     let step = speed.min(dist);
                     self.x += dx / dist * step;
                     self.z += dz / dist * step;
