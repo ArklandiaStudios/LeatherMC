@@ -82,6 +82,9 @@ fn main() -> Result<()> {
     let (count, entries) = convert_registries(&mut inner, out)?;
     println!("wrote {count} registry entries");
 
+    let wg = copy_worldgen(&mut inner, out).context("copying worldgen data")?;
+    println!("copied {wg} worldgen data files");
+
     match registries_json {
         Some(path) => {
             let n = tags::write_tags(&mut inner, out, &path, &entries)
@@ -168,6 +171,41 @@ fn convert_registries(
         ids.sort();
     }
     Ok((total, entries))
+}
+
+/// Worldgen data folders the server needs for terrain (copied verbatim — these
+/// are data, not code). `density_function` keeps its subfolders (overworld/…).
+const WORLDGEN_DIRS: &[&str] = &["noise", "density_function", "noise_settings"];
+
+/// Copies the worldgen JSON (noise params, density functions, noise settings)
+/// from the jar's datapack into `out/worldgen/…`, preserving paths. Returns the
+/// number of files copied.
+fn copy_worldgen(inner: &mut ZipArchive<Cursor<Vec<u8>>>, out: &Path) -> Result<usize> {
+    let mut copied = 0usize;
+    for i in 0..inner.len() {
+        let mut entry = inner.by_index(i)?;
+        let name = entry.name().to_string();
+        let Some(rel) = WORLDGEN_DIRS.iter().find_map(|dir| {
+            let prefix = format!("data/minecraft/worldgen/{dir}/");
+            name.strip_prefix("data/minecraft/worldgen/")
+                .filter(|_| name.starts_with(&prefix) && name.ends_with(".json"))
+        }) else {
+            continue;
+        };
+
+        let mut bytes = Vec::new();
+        entry.read_to_end(&mut bytes)?;
+        let dest = out.join("worldgen").join(rel);
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&dest, &bytes)?;
+        copied += 1;
+    }
+    if copied == 0 {
+        bail!("no worldgen data found — is this the right server jar?");
+    }
+    Ok(copied)
 }
 
 /// If `name` is a synced-registry datapack file
