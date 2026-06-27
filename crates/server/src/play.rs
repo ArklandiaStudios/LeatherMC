@@ -23,6 +23,7 @@ const P_CHUNK_BATCH_FINISHED: i32 = 11;
 const P_SYSTEM_CHAT: i32 = 121;
 const P_BLOCK_UPDATE: i32 = 8;
 const P_BLOCK_CHANGED_ACK: i32 = 4;
+const P_SET_HEALTH: i32 = 104;
 
 // Serverbound play packet ids we care about.
 const S_MOVE_POS: i32 = 30;
@@ -42,6 +43,14 @@ const MELEE_DAMAGE: f32 = 1.0;
 /// Bare-hand attack speed (full-charge hits per second). The attack-strength
 /// meter recharges over `20 / ATTACK_SPEED` ticks.
 const ATTACK_SPEED: f32 = 4.0;
+
+/// Player health and the damage-immunity window after being hit (10 ticks).
+const PLAYER_MAX_HEALTH: f32 = 20.0;
+const PLAYER_IFRAMES: u32 = 10;
+/// Where the player spawns (and respawns) — the flat world's surface.
+const SPAWN_X: f64 = 0.0;
+const SPAWN_Y: f64 = 64.0;
+const SPAWN_Z: f64 = 0.0;
 
 /// Player-inventory container slot of hotbar slot 0 (hotbar is slots 36..=44).
 const HOTBAR_OFFSET: i32 = 36;
@@ -106,10 +115,15 @@ pub async fn handle(
     // When the player last hit something, for the 1.9+ attack-cooldown scaling.
     let mut last_attack: Option<Instant> = None;
     // Player position/vertical state, for critical hits and knockback direction.
-    let mut player_x = 0.0_f64;
-    let mut player_z = 0.0_f64;
-    let mut player_y = 64.0_f64;
+    let mut player_x = SPAWN_X;
+    let mut player_z = SPAWN_Z;
+    let mut player_y = SPAWN_Y;
     let mut player_falling = false;
+
+    // Player health and its damage-immunity window.
+    let mut player_health = PLAYER_MAX_HEALTH;
+    let mut player_invuln: u32 = 0;
+    send_set_health(&mut writer, player_health).await?;
 
     loop {
         tokio::select! {
@@ -271,13 +285,34 @@ pub async fn handle(
                 }
             }
             _ = mob_interval.tick() => {
+                player_invuln = player_invuln.saturating_sub(1);
+                // Tick every mob; collect the hardest melee hit landing this tick.
+                let mut hit = 0.0_f32;
                 let mut i = 0;
                 while i < mobs.len() {
                     match mobs[i].tick(&mut writer, player_x, player_z).await {
-                        Ok(true) => { mobs.remove(i); } // death animation finished
-                        Ok(false) => i += 1,
+                        Ok(true) => { mobs.remove(i); continue; } // death finished
+                        Ok(false) => {}
                         Err(_) => return Ok(()),
                     }
+                    if let Some(d) = mobs[i].melee_damage(player_x, player_z) {
+                        hit = hit.max(d);
+                    }
+                    i += 1;
+                }
+                // Apply damage through the player's own immunity window.
+                if hit > 0.0 && player_invuln == 0 {
+                    player_health = (player_health - hit).max(0.0);
+                    player_invuln = PLAYER_IFRAMES;
+                    if player_health <= 0.0 {
+                        // Simple respawn: heal and teleport back to spawn.
+                        player_health = PLAYER_MAX_HEALTH;
+                        player_x = SPAWN_X;
+                        player_y = SPAWN_Y;
+                        player_z = SPAWN_Z;
+                        send_teleport(&mut writer, SPAWN_X, SPAWN_Y, SPAWN_Z).await?;
+                    }
+                    send_set_health(&mut writer, player_health).await?;
                 }
             }
         }
@@ -375,6 +410,26 @@ fn offset_block(packed: i64, face: i32) -> (i32, i32, i32) {
     (x, y, z)
 }
 
+/// Updates the player's health bar (food and saturation kept full for now).
+async fn send_set_health<W: AsyncWrite + Unpin>(writer: &mut W, health: f32) -> Result<()> {
+    let mut w = PacketWriter::new(P_SET_HEALTH);
+    w.write_f32(health);
+    w.write_varint(20); // food
+    w.write_f32(5.0); // saturation
+    write_frame(writer, &w.into_body()).await
+}
+
+/// Teleports the player to `(x, y, z)` (used for respawn).
+async fn send_teleport<W: AsyncWrite + Unpin>(writer: &mut W, x: f64, y: f64, z: f64) -> Result<()> {
+    let mut w = PacketWriter::new(P_PLAYER_POSITION);
+    w.write_varint(1); // teleport id
+    w.write_f64(x).write_f64(y).write_f64(z);
+    w.write_f64(0.0).write_f64(0.0).write_f64(0.0); // velocity
+    w.write_f32(0.0).write_f32(0.0); // yaw, pitch
+    w.write_i32(0); // relative flags (all absolute)
+    write_frame(writer, &w.into_body()).await
+}
+
 /// Sends an (unsigned) system chat message — simpler than signed player chat.
 async fn send_system_chat<W: AsyncWrite + Unpin>(writer: &mut W, text: &str) -> Result<()> {
     let mut nbt = Vec::new();
@@ -409,7 +464,7 @@ async fn send_join_game(stream: &mut TcpStream, registries: &Registries) -> Resu
     w.write_varint(dimension_type_index);
     w.write_string("minecraft:overworld"); // dimension (world) name
     w.write_i64(0); // hashed seed
-    w.write_u8(1); // game mode: creative (so we can fly)
+    w.write_u8(0); // game mode: survival (so the player can take damage)
     w.write_i8(-1); // previous game mode: none
     w.write_bool(false); // is debug world
     w.write_bool(false); // is flat world

@@ -208,6 +208,12 @@ const STOP_DISTANCE: f64 = 1.6;
 /// How long a provoked neutral mob stays angry and chases (ticks ≈ 10s).
 const AGGRO_TICKS: u32 = 200;
 
+/// Mob melee: an aggressive mob within reach hits the player for this much, this
+/// often (a single default for now; per-mob attack values come later).
+const MOB_ATTACK_DAMAGE: f32 = 3.0;
+const MOB_ATTACK_INTERVAL: u32 = 20; // ticks between hits (~1s)
+const MOB_REACH: f64 = STOP_DISTANCE + 0.4;
+
 /// Knockback when hit: a shove away from the attacker plus a small upward pop
 /// (blocks per tick), then gravity and ground friction bring it to rest.
 const KNOCKBACK_H: f64 = 0.4;
@@ -250,6 +256,8 @@ pub struct Mob {
     panic_ticks: u32,
     /// Ticks a provoked neutral mob stays angry and chases the player.
     anger_ticks: u32,
+    /// Ticks until this mob can melee the player again.
+    attack_cooldown: u32,
     /// Per-mob PRNG state (xorshift), for wander/idle decisions.
     rng: u64,
     /// Current body and head headings, in degrees, eased toward the target.
@@ -285,6 +293,7 @@ impl Mob {
             idle_ticks: 0,
             panic_ticks: 0,
             anger_ticks: 0,
+            attack_cooldown: 0,
             // Seed the PRNG from the id so each mob wanders differently (nonzero).
             rng: 0x9E37_79B9_7F4A_7C15 ^ (entity_id as u64).wrapping_mul(0x2545_F491_4F6C_DD1D),
             body_yaw: -90.0, // east
@@ -458,6 +467,26 @@ impl Mob {
         }
     }
 
+    /// If this mob is aggressive, within reach of the player `(px, pz)` and its
+    /// attack has recharged, returns the melee damage to deal (and starts the
+    /// cooldown). Otherwise `None`.
+    pub fn melee_damage(&mut self, px: f64, pz: f64) -> Option<f32> {
+        let aggressive = match self.kind.behavior {
+            Behavior::Hostile => true,
+            Behavior::Neutral => self.anger_ticks > 0,
+            Behavior::Passive => false,
+        };
+        if !aggressive || self.is_dying() || self.attack_cooldown > 0 {
+            return None;
+        }
+        if (self.x - px).hypot(self.z - pz) <= MOB_REACH {
+            self.attack_cooldown = MOB_ATTACK_INTERVAL;
+            Some(MOB_ATTACK_DAMAGE)
+        } else {
+            None
+        }
+    }
+
     /// Next PRNG value (xorshift64).
     fn next_rng(&mut self) -> u64 {
         let mut x = self.rng;
@@ -522,6 +551,9 @@ impl Mob {
 
         if self.invulnerable > 0 {
             self.invulnerable -= 1;
+        }
+        if self.attack_cooldown > 0 {
+            self.attack_cooldown -= 1;
         }
         let panicking = self.panic_ticks > 0;
         if panicking {
