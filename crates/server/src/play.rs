@@ -1,14 +1,14 @@
 //! Play state: put the player in a flat world and stream chunks around them as
 //! they move, so the world feels endless (no visible edge).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
 use leather_protocol::{Nbt, PacketWriter, Result, read_frame, write_frame, write_network_nbt};
 use tokio::io::AsyncWrite;
 use tokio::net::TcpStream;
 
-use crate::chunk::flat_chunk;
+use crate::chunk::generate_chunk;
 use crate::registries::Registries;
 use crate::world::World;
 
@@ -47,9 +47,9 @@ const ATTACK_SPEED: f32 = 4.0;
 /// Player health and the damage-immunity window after being hit (10 ticks).
 const PLAYER_MAX_HEALTH: f32 = 20.0;
 const PLAYER_IFRAMES: u32 = 10;
-/// Where the player spawns (and respawns) — the flat world's surface.
+/// Where the player spawns (and respawns) horizontally; the height follows the
+/// generated terrain (computed at connect time).
 const SPAWN_X: f64 = 0.0;
-const SPAWN_Y: f64 = 64.0;
 const SPAWN_Z: f64 = 0.0;
 
 /// Player-inventory container slot of hotbar slot 0 (hotbar is slots 36..=44).
@@ -72,8 +72,11 @@ pub async fn handle(
     name: &str,
     world: &World,
 ) -> Result<()> {
+    // Spawn on top of the generated terrain at (0, 0).
+    let spawn_y = (crate::worldgen::surface_height(0, 0) + 1) as f64;
+
     send_join_game(stream, registries).await?;
-    send_spawn_position(stream).await?;
+    send_spawn_position(stream, spawn_y).await?;
 
     // Tell the client to wait for chunks (shows the loading progress).
     let mut event = PacketWriter::new(P_GAME_EVENT);
@@ -104,6 +107,12 @@ pub async fn handle(
     let mut projectiles: Vec<crate::projectile::Projectile> = Vec::new();
     let mut next_projectile_id: i32 = 1000;
 
+    // Pending water-flow updates (positions to re-evaluate), with a dedup set.
+    let mut fluid_queue: VecDeque<(i32, i32, i32)> = VecDeque::new();
+    let mut fluid_pending: HashSet<(i32, i32, i32)> = HashSet::new();
+    let mut fluid_interval = tokio::time::interval(Duration::from_millis(250));
+    fluid_interval.tick().await; // consume the immediate first tick
+
     // Track the creative hotbar so we can place the block the player holds.
     let mut inventory: HashMap<i32, i32> = HashMap::new(); // container slot -> item id
     let mut selected: i32 = 0; // hotbar index 0..=8
@@ -117,7 +126,7 @@ pub async fn handle(
     // Player position/vertical state, for critical hits and knockback direction.
     let mut player_x = SPAWN_X;
     let mut player_z = SPAWN_Z;
-    let mut player_y = SPAWN_Y;
+    let mut player_y = spawn_y;
     let mut player_falling = false;
 
     // Player health and its damage-immunity window.
@@ -180,6 +189,7 @@ pub async fn handle(
                             world.set_block(x, y, z, STATE_AIR);
                             send_block_update(&mut writer, pos, STATE_AIR).await?;
                             send_block_ack(&mut writer, seq).await?;
+                            enqueue_fluid(&mut fluid_queue, &mut fluid_pending, x, y, z);
                         }
                     }
                     // Place the held block on the clicked face.
@@ -200,6 +210,7 @@ pub async fn handle(
                                     world.set_block(tx, ty, tz, state);
                                     send_block_update(&mut writer, encode_position(tx, ty, tz), state)
                                         .await?;
+                                    enqueue_fluid(&mut fluid_queue, &mut fluid_pending, tx, ty, tz);
                                 }
                                 send_block_ack(&mut writer, seq).await?;
                             }
@@ -349,13 +360,48 @@ pub async fn handle(
                         // Simple respawn: heal and teleport back to spawn.
                         player_health = PLAYER_MAX_HEALTH;
                         player_x = SPAWN_X;
-                        player_y = SPAWN_Y;
+                        player_y = spawn_y;
                         player_z = SPAWN_Z;
-                        send_teleport(&mut writer, SPAWN_X, SPAWN_Y, SPAWN_Z).await?;
+                        send_teleport(&mut writer, SPAWN_X, spawn_y, SPAWN_Z).await?;
                     }
                     send_set_health(&mut writer, player_health).await?;
                 }
             }
+            _ = fluid_interval.tick() => {
+                // Spread/recede water around recent changes (bounded per tick).
+                let mut budget = 2048;
+                while budget > 0 {
+                    let Some((x, y, z)) = fluid_queue.pop_front() else { break };
+                    fluid_pending.remove(&(x, y, z));
+                    budget -= 1;
+                    if let Some(new) = crate::fluid::update(world, x, y, z) {
+                        world.set_block(x, y, z, new);
+                        send_block_update(&mut writer, encode_position(x, y, z), new).await?;
+                        for (nx, ny, nz) in crate::fluid::neighbours(x, y, z) {
+                            enqueue_fluid(&mut fluid_queue, &mut fluid_pending, nx, ny, nz);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Queues a position (and its neighbours) for a water-flow re-evaluation,
+/// skipping any already pending.
+fn enqueue_fluid(
+    queue: &mut VecDeque<(i32, i32, i32)>,
+    pending: &mut HashSet<(i32, i32, i32)>,
+    x: i32,
+    y: i32,
+    z: i32,
+) {
+    if pending.insert((x, y, z)) {
+        queue.push_back((x, y, z));
+    }
+    for (nx, ny, nz) in crate::fluid::neighbours(x, y, z) {
+        if pending.insert((nx, ny, nz)) {
+            queue.push_back((nx, ny, nz));
         }
     }
 }
@@ -397,7 +443,7 @@ async fn load_around<W: AsyncWrite + Unpin>(
     write_frame(writer, &PacketWriter::new(P_CHUNK_BATCH_START).into_body()).await?;
     for (x, z) in &new_chunks {
         let edits = world.chunk_edits(*x, *z);
-        write_frame(writer, &flat_chunk(*x, *z, biome, &edits)).await?;
+        write_frame(writer, &generate_chunk(*x, *z, biome, &edits)).await?;
     }
     let mut finished = PacketWriter::new(P_CHUNK_BATCH_FINISHED);
     finished.write_varint(new_chunks.len() as i32);
@@ -505,7 +551,7 @@ async fn send_join_game(stream: &mut TcpStream, registries: &Registries) -> Resu
     w.write_varint(dimension_type_index);
     w.write_string("minecraft:overworld"); // dimension (world) name
     w.write_i64(0); // hashed seed
-    w.write_u8(0); // game mode: survival (so the player can take damage)
+    w.write_u8(1); // game mode: creative (fly + creative inventory)
     w.write_i8(-1); // previous game mode: none
     w.write_bool(false); // is debug world
     w.write_bool(false); // is flat world
@@ -519,10 +565,10 @@ async fn send_join_game(stream: &mut TcpStream, registries: &Registries) -> Resu
     write_frame(stream, &w.into_body()).await
 }
 
-async fn send_spawn_position(stream: &mut TcpStream) -> Result<()> {
+async fn send_spawn_position(stream: &mut TcpStream, y: f64) -> Result<()> {
     let mut w = PacketWriter::new(P_PLAYER_POSITION);
     w.write_varint(1); // teleport id
-    w.write_f64(0.0).write_f64(64.0).write_f64(0.0); // position: on the stone floor
+    w.write_f64(SPAWN_X).write_f64(y).write_f64(SPAWN_Z); // position: on the surface
     w.write_f64(0.0).write_f64(0.0).write_f64(0.0); // velocity
     w.write_f32(0.0).write_f32(0.0); // yaw, pitch
     w.write_i32(0); // relative-flags bitfield (all absolute)

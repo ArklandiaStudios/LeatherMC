@@ -32,6 +32,22 @@ impl World {
             .insert((x, y, z), state);
     }
 
+    /// The current block state at `(x, y, z)`: an edit if one exists, otherwise
+    /// the generated terrain block.
+    pub fn block_at(&self, x: i32, y: i32, z: i32) -> i32 {
+        let chunk = (x.div_euclid(16), z.div_euclid(16));
+        if let Some(&state) = self
+            .edits
+            .lock()
+            .unwrap()
+            .get(&chunk)
+            .and_then(|m| m.get(&(x, y, z)))
+        {
+            return state;
+        }
+        crate::worldgen::block_state(y, crate::worldgen::surface_height(x, z))
+    }
+
     /// Snapshot of a chunk's edits (global pos -> state).
     pub fn chunk_edits(&self, cx: i32, cz: i32) -> ChunkEdits {
         self.edits

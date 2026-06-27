@@ -1,32 +1,31 @@
-//! Encodes a flat chunk, applying any block edits from the world.
+//! Encodes a generated chunk, applying any block edits from the world.
 //!
-//! Sections with no edits stay *uniform* (a single-value palette, no data).
-//! Edited sections use a real paletted container: an indirect palette when few
-//! distinct blocks (4–8 bits/entry), or a direct palette otherwise.
+//! Each section is built from the world generator (terrain height + surface
+//! rule) plus any edits, then encoded as a paletted container. Uniform sections
+//! (all stone deep down, all air high up) collapse to a single-value palette.
 
 use std::collections::HashMap;
 
 use leather_protocol::{PacketWriter, write_varint};
+
+use crate::worldgen;
 
 const PKT_LEVEL_CHUNK: i32 = 45;
 
 /// Overworld is 384 blocks tall (min_y -64) -> 24 sections of 16.
 const SECTION_COUNT: usize = 24;
 const MIN_Y: i32 = -64;
-/// Sections up to y=63 are solid stone (the floor); above is air.
-const STONE_TOP_Y: i32 = 63;
 
 const STATE_AIR: i32 = 0;
-const STATE_STONE: i32 = 1;
 /// Bits per entry for a direct palette (ceil(log2) of the block-state count).
 const DIRECT_BITS: u8 = 15;
 
 /// Light data is 2048 bytes per section (4096 nibbles). 0xFF = full (15).
 const LIGHT_ARRAY_LEN: usize = 2048;
 
-/// Builds the full `level_chunk_with_light` packet body for one chunk,
-/// applying `edits` (global block pos -> state) belonging to this chunk.
-pub fn flat_chunk(
+/// Builds the full `level_chunk_with_light` packet body for one chunk: generates
+/// its terrain and applies `edits` (global block pos -> state) for this chunk.
+pub fn generate_chunk(
     chunk_x: i32,
     chunk_z: i32,
     biome_index: i32,
@@ -46,39 +45,45 @@ pub fn flat_chunk(
         }
     }
 
+    // Surface height for each of the 16x16 columns in this chunk.
+    let mut heights = [0i32; 256];
+    for lz in 0..16 {
+        for lx in 0..16 {
+            let wx = chunk_x * 16 + lx as i32;
+            let wz = chunk_z * 16 + lz as i32;
+            heights[lz * 16 + lx] = worldgen::surface_height(wx, wz);
+        }
+    }
+
     let mut sections = Vec::new();
     for s in 0..SECTION_COUNT {
         let section_min_y = MIN_Y + (s as i32) * 16;
-        let base = if section_min_y + 15 <= STONE_TOP_Y {
-            STATE_STONE
-        } else {
-            STATE_AIR
-        };
 
-        // Block edits inside this section, as (local index, state).
-        let mut local: Vec<(usize, i32)> = Vec::new();
+        // Fill the section from the generator (YZX order), then apply edits.
+        let mut blocks = vec![STATE_AIR; 4096];
+        for ly in 0..16 {
+            let wy = section_min_y + ly as i32;
+            for lz in 0..16 {
+                for lx in 0..16 {
+                    let h = heights[lz * 16 + lx];
+                    blocks[(ly * 16 + lz) * 16 + lx] = worldgen::block_state(wy, h);
+                }
+            }
+        }
         for (&(x, y, z), &state) in edits {
             if y >= section_min_y && y < section_min_y + 16 {
                 let lx = x.rem_euclid(16) as usize;
                 let lz = z.rem_euclid(16) as usize;
                 let ly = (y - section_min_y) as usize;
-                local.push(((ly * 16 + lz) * 16 + lx, state)); // YZX order
+                blocks[(ly * 16 + lz) * 16 + lx] = state;
             }
         }
 
-        let (block_container, non_air) = if local.is_empty() {
-            let non_air = if base == STATE_AIR { 0 } else { 4096 };
-            (single_value_container(base), non_air)
-        } else {
-            let mut blocks = vec![base; 4096];
-            for (idx, state) in local {
-                blocks[idx] = state;
-            }
-            encode_block_section(&blocks)
-        };
+        let liquid = blocks.iter().filter(|&&b| b == worldgen::WATER).count() as i16;
+        let (block_container, non_air) = encode_block_section(&blocks);
 
         sections.extend_from_slice(&(non_air as i16).to_be_bytes()); // non-air count
-        sections.extend_from_slice(&0i16.to_be_bytes()); // liquid count (26.1+)
+        sections.extend_from_slice(&liquid.to_be_bytes()); // liquid count (26.1+)
         sections.extend_from_slice(&block_container);
         sections.extend_from_slice(&single_value_container(biome_index)); // biome
     }
